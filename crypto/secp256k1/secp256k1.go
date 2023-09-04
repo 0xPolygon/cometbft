@@ -10,7 +10,7 @@ import (
 
 	secp256k1 "github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/ecdsa"
-	"golang.org/x/crypto/ripemd160" //nolint: staticcheck // necessary for Bitcoin address format
+	ethCrypto "github.com/ethereum/go-ethereum/crypto"
 
 	"github.com/cometbft/cometbft/crypto"
 	cmtjson "github.com/cometbft/cometbft/libs/json"
@@ -43,11 +43,18 @@ func (privKey PrivKey) Bytes() []byte {
 // PubKey performs the point-scalar multiplication from the privKey on the
 // generator point to get the pubkey.
 func (privKey PrivKey) PubKey() crypto.PubKey {
-	_, pubkeyObject := secp256k1.PrivKeyFromBytes(privKey)
+	privateObject, err := ethCrypto.ToECDSA(privKey)
+	if err != nil {
+		panic(err)
+	}
 
-	pk := pubkeyObject.SerializeCompressed()
-
+	pk := ethCrypto.FromECDSAPub(&privateObject.PublicKey)
 	return PubKey(pk)
+
+	// _, pubkeyObject := secp256k1.PrivKeyFromBytes(privKey)
+
+	// pk := pubkeyObject.SerializeCompressed()
+	// return PubKey(pk)
 }
 
 // Equals - you probably don't need to use this.
@@ -71,24 +78,33 @@ func GenPrivKey() PrivKey {
 
 // genPrivKey generates a new secp256k1 private key using the provided reader.
 func genPrivKey(rand io.Reader) PrivKey {
-	var privKeyBytes [PrivKeySize]byte
-	d := new(big.Int)
+	// var privKeyBytes [PrivKeySize]byte
+	// d := new(big.Int)
 
-	for {
-		privKeyBytes = [PrivKeySize]byte{}
-		_, err := io.ReadFull(rand, privKeyBytes[:])
-		if err != nil {
-			panic(err)
-		}
+	// for {
+	// 	privKeyBytes = [PrivKeySize]byte{}
+	// 	_, err := io.ReadFull(rand, privKeyBytes[:])
+	// 	if err != nil {
+	// 		panic(err)
+	// 	}
 
-		d.SetBytes(privKeyBytes[:])
-		// break if we found a valid point (i.e. > 0 and < N == curverOrder)
-		isValidFieldElement := 0 < d.Sign() && d.Cmp(secp256k1.S256().N) < 0
-		if isValidFieldElement {
-			break
-		}
+	// 	d.SetBytes(privKeyBytes[:])
+	// 	// break if we found a valid point (i.e. > 0 and < N == curverOrder)
+	// 	isValidFieldElement := 0 < d.Sign() && d.Cmp(secp256k1.S256().N) < 0
+	// 	if isValidFieldElement {
+	// 		break
+	// 	}
+	// }
+
+	// return PrivKey(privKeyBytes[:])
+
+	privKeyBytes := [PrivKeySize]byte{}
+	_, err := io.ReadFull(rand, privKeyBytes[:])
+	if err != nil {
+		panic(err)
 	}
-
+	// crypto.CRandBytes is guaranteed to be 32 bytes long, so it can be
+	// casted to PrivKey.
 	return PrivKey(privKeyBytes[:])
 }
 
@@ -126,15 +142,18 @@ func GenPrivKeySecp256k1(secret []byte) PrivKey {
 // Sign creates an ECDSA signature on curve Secp256k1, using SHA256 on the msg.
 // The returned signature will be of the form R || S (in lower-S form).
 func (privKey PrivKey) Sign(msg []byte) ([]byte, error) {
-	priv, _ := secp256k1.PrivKeyFromBytes(privKey)
+	// [peppermint] sign with ethcrypto
+	// priv, _ := secp256k1.PrivKeyFromBytes(privKey)
 
-	sig, err := ecdsa.SignCompact(priv, crypto.Sha256(msg), false)
+	// sig, err := ecdsa.SignCompact(priv, crypto.Sha256(msg), false)
+	privateObject, err := ethCrypto.ToECDSA(privKey)
 	if err != nil {
 		return nil, err
 	}
 
-	// remove the first byte which is compactSigRecoveryCode
-	return sig[1:], nil
+	// // remove the first byte which is compactSigRecoveryCode
+	// return sig[1:], nil
+	return ethCrypto.Sign(ethCrypto.Keccak256(msg), privateObject)
 }
 
 //-------------------------------------
@@ -143,7 +162,8 @@ var _ crypto.PubKey = PubKey{}
 
 // PubKeySize is comprised of 32 bytes for one field element
 // (the x-coordinate), plus one byte for the parity of the y-coordinate.
-const PubKeySize = 33
+// const PubKeySize = 33
+const PubKeySize = 65
 
 // PubKey implements crypto.PubKey.
 // It is the compressed form of the pubkey. The first byte depends is a 0x02 byte
@@ -157,14 +177,15 @@ func (pubKey PubKey) Address() crypto.Address {
 	if len(pubKey) != PubKeySize {
 		panic("length of pubkey is incorrect")
 	}
-	hasherSHA256 := sha256.New()
-	_, _ = hasherSHA256.Write(pubKey) // does not error
-	sha := hasherSHA256.Sum(nil)
+	// hasherSHA256 := sha256.New()
+	// _, _ = hasherSHA256.Write(pubKey) // does not error
+	// sha := hasherSHA256.Sum(nil)
 
-	hasherRIPEMD160 := ripemd160.New()
-	_, _ = hasherRIPEMD160.Write(sha) // does not error
+	// hasherRIPEMD160 := ripemd160.New()
+	// _, _ = hasherRIPEMD160.Write(sha) // does not error
 
-	return crypto.Address(hasherRIPEMD160.Sum(nil))
+	// return crypto.Address(hasherRIPEMD160.Sum(nil))
+	return crypto.Address(ethCrypto.Keccak256(pubKey[1:])[12:])
 }
 
 // Bytes returns the pubkey marshaled with amino encoding.
@@ -190,30 +211,33 @@ func (pubKey PubKey) Type() string {
 // VerifySignature verifies a signature of the form R || S.
 // It rejects signatures which are not in lower-S form.
 func (pubKey PubKey) VerifySignature(msg []byte, sigStr []byte) bool {
-	if len(sigStr) != 64 {
-		return false
-	}
+	// if len(sigStr) != 64 {
+	// 	return false
+	// }
 
-	pub, err := secp256k1.ParsePubKey(pubKey)
-	if err != nil {
-		return false
-	}
+	// pub, err := secp256k1.ParsePubKey(pubKey)
+	// if err != nil {
+	// 	return false
+	// }
 
-	// parse the signature:
-	signature := signatureFromBytes(sigStr)
-	// Reject malleable signatures. libsecp256k1 does this check but btcec doesn't.
-	// see: https://github.com/ethereum/go-ethereum/blob/f9401ae011ddf7f8d2d95020b7446c17f8d98dc1/crypto/signature_nocgo.go#L90-L93
-	// Serialize() would negate S value if it is over half order.
-	// Hence, if the signature is different after Serialize() if should be rejected.
-	var modifiedSignature, parseErr = ecdsa.ParseDERSignature(signature.Serialize())
-	if parseErr != nil {
-		return false
-	}
-	if !signature.IsEqual(modifiedSignature) {
-		return false
-	}
+	// // parse the signature:
+	// signature := signatureFromBytes(sigStr)
+	// // Reject malleable signatures. libsecp256k1 does this check but btcec doesn't.
+	// // see: https://github.com/ethereum/go-ethereum/blob/f9401ae011ddf7f8d2d95020b7446c17f8d98dc1/crypto/signature_nocgo.go#L90-L93
+	// // Serialize() would negate S value if it is over half order.
+	// // Hence, if the signature is different after Serialize() if should be rejected.
+	// var modifiedSignature, parseErr = ecdsa.ParseDERSignature(signature.Serialize())
+	// if parseErr != nil {
+	// 	return false
+	// }
+	// if !signature.IsEqual(modifiedSignature) {
+	// 	return false
+	// }
 
-	return signature.Verify(crypto.Sha256(msg), pub)
+	hash := ethCrypto.Keccak256(msg)
+	return ethCrypto.VerifySignature(pubKey, hash, sigStr[:64])
+
+	// return signature.Verify(crypto.Sha256(msg), pub)
 }
 
 // Read Signature struct from R || S. Caller needs to ensure
