@@ -18,8 +18,10 @@ import (
 
 // -------------------------------------
 const (
-	PrivKeyName = "tendermint/PrivKeySecp256k1"
-	PubKeyName  = "tendermint/PubKeySecp256k1"
+	PrivKeyNameOld = "tendermint/PrivKeySecp256k1"
+	PubKeyNameOld  = "tendermint/PubKeySecp256k1"
+	PrivKeyName    = "comet/PrivKeySecp256k1Uncompressed"
+	PubKeyName     = "comet/PubKeySecp256k1Uncompressed"
 
 	KeyType     = "secp256k1"
 	PrivKeySize = 32
@@ -28,12 +30,33 @@ const (
 func init() {
 	cmtjson.RegisterType(PubKey{}, PubKeyName)
 	cmtjson.RegisterType(PrivKey{}, PrivKeyName)
+	cmtjson.RegisterType(PubKeyOld{}, PubKeyNameOld)
+	cmtjson.RegisterType(PrivKeyOld{}, PrivKeyNameOld)
 }
 
 var _ crypto.PrivKey = PrivKey{}
+var _ crypto.PrivKey = PrivKeyOld{}
 
 // PrivKey implements PrivKey.
 type PrivKey []byte
+
+type PrivKeyOld []byte
+
+func (privKey PrivKeyOld) Bytes() []byte {
+	return PrivKey(privKey).Bytes()
+}
+func (privKey PrivKeyOld) PubKey() crypto.PubKey {
+	return PrivKey(privKey).PubKey()
+}
+func (privKey PrivKeyOld) Equals(other crypto.PrivKey) bool {
+	return PrivKey(privKey).Equals(other)
+}
+func (privKey PrivKeyOld) Type() string {
+	return PrivKey(privKey).Type()
+}
+func (privKey PrivKeyOld) Sign(msg []byte) ([]byte, error) {
+	return PrivKey(privKey).Sign(msg)
+}
 
 // Bytes marshalls the private key using amino encoding.
 func (privKey PrivKey) Bytes() []byte {
@@ -159,6 +182,7 @@ func (privKey PrivKey) Sign(msg []byte) ([]byte, error) {
 //-------------------------------------
 
 var _ crypto.PubKey = PubKey{}
+var _ crypto.PubKey = PubKeyOld{}
 
 // PubKeySize is comprised of 32 bytes for one field element
 // (the x-coordinate), plus one byte for the parity of the y-coordinate.
@@ -171,6 +195,31 @@ const PubKeySize = 65
 // the x-coordinate. Otherwise the first byte is a 0x03.
 // This prefix is followed with the x-coordinate.
 type PubKey []byte
+type PubKeyOld []byte
+
+func (pubKey PubKeyOld) Address() crypto.Address {
+	return PubKey(pubKey).Address()
+}
+
+func (pubKey PubKeyOld) Bytes() []byte {
+	return PubKey(pubKey).Bytes()
+}
+
+func (pubKey PubKeyOld) String() string {
+	return PubKey(pubKey).String()
+}
+
+func (pubKey PubKeyOld) Equals(other crypto.PubKey) bool {
+	return PubKey(pubKey).Equals(other)
+}
+
+func (pubKey PubKeyOld) Type() string {
+	return PubKey(pubKey).Type()
+}
+
+func (pubKey PubKeyOld) VerifySignature(msg []byte, sigStr []byte) bool {
+	return PubKey(pubKey).VerifySignature(msg, sigStr)
+}
 
 // Address returns a Bitcoin style addresses: RIPEMD160(SHA256(pubkey))
 func (pubKey PubKey) Address() crypto.Address {
