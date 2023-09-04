@@ -224,7 +224,7 @@ func (pubKey PubKeyOld) VerifySignature(msg []byte, sigStr []byte) bool {
 // Address returns a Bitcoin style addresses: RIPEMD160(SHA256(pubkey))
 func (pubKey PubKey) Address() crypto.Address {
 	if len(pubKey) != PubKeySize {
-		panic("length of pubkey is incorrect")
+		panic(fmt.Sprintf("length of pubkey is incorrect %d != %d", len(pubKey), PubKeySize))
 	}
 	// hasherSHA256 := sha256.New()
 	// _, _ = hasherSHA256.Write(pubKey) // does not error
