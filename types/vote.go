@@ -53,16 +53,32 @@ type Address = crypto.Address
 // Vote represents a prevote, precommit, or commit vote from validators for
 // consensus.
 type Vote struct {
-	Type               cmtproto.SignedMsgType `json:"type"`
-	Height             int64                  `json:"height"`
-	Round              int32                  `json:"round"`    // assume there will not be greater than 2_147_483_647 rounds
-	BlockID            BlockID                `json:"block_id"` // zero if vote is nil.
-	Timestamp          time.Time              `json:"timestamp"`
-	ValidatorAddress   Address                `json:"validator_address"`
-	ValidatorIndex     int32                  `json:"validator_index"`
-	Signature          []byte                 `json:"signature"`
-	Extension          []byte                 `json:"extension"`
-	ExtensionSignature []byte                 `json:"extension_signature"`
+	Type             cmtproto.SignedMsgType `json:"type"`
+	Height           int64                  `json:"height"`
+	Round            int32                  `json:"round"`    // assume there will not be greater than 2_147_483_647 rounds
+	BlockID          BlockID                `json:"block_id"` // zero if vote is nil.
+	Timestamp        time.Time              `json:"timestamp"`
+	ValidatorAddress Address                `json:"validator_address"`
+	ValidatorIndex   int32                  `json:"validator_index"`
+	Signature        []byte                 `json:"signature"`
+
+	SideTxResults      []SideTxResult `json:"side_tx_results"` // side-tx result [peppermint]
+	Extension          []byte         `json:"extension"`
+	ExtensionSignature []byte         `json:"extension_signature"`
+}
+
+// From peppermint, will be removed eventually
+type LegacyVote struct {
+	Type             SignedMsgType `json:"type"`
+	Height           int64         `json:"height"`
+	Round            int           `json:"round"`
+	BlockID          BlockID       `json:"block_id"` // zero if vote is nil.
+	Timestamp        time.Time     `json:"timestamp"`
+	ValidatorAddress Address       `json:"validator_address"`
+	ValidatorIndex   int           `json:"validator_index"`
+	Signature        []byte        `json:"signature"`
+
+	SideTxResults []SideTxResult `json:"side_tx_results"` // side-tx result [peppermint]
 }
 
 // VoteFromProto attempts to convert the given serialization (Protobuf) type to
@@ -75,6 +91,7 @@ func VoteFromProto(pv *cmtproto.Vote) (*Vote, error) {
 		return nil, err
 	}
 
+	// TODO(@raneet10): Probably need to add SideTxResult
 	return &Vote{
 		Type:               pv.Type,
 		Height:             pv.Height,
@@ -161,6 +178,16 @@ func VoteExtensionSignBytes(chainID string, vote *cmtproto.Vote) []byte {
 	return bz
 }
 
+// From peppermint
+func (vote *LegacyVote) SignBytes(chainID string) []byte {
+	bz, err := cdc.MarshalBinaryLengthPrefixed(LegacyCanonicalizeVote(chainID, vote))
+	if err != nil {
+		panic(err)
+	}
+
+	return bz
+}
+
 func (vote *Vote) Copy() *Vote {
 	voteCopy := *vote
 	return &voteCopy
@@ -193,7 +220,17 @@ func (vote *Vote) String() string {
 		panic("Unknown vote type")
 	}
 
-	return fmt.Sprintf("Vote{%v:%X %v/%02d/%v(%v) %X %X %X @ %s}",
+	// TODO(@raneet10): to be eventually removed
+	sideTxResults := "Proposals "
+	if len(vote.SideTxResults) > 0 {
+		for _, s := range vote.SideTxResults {
+			sideTxResults += s.String()
+		}
+	} else {
+		sideTxResults = "no-proposals"
+	}
+
+	return fmt.Sprintf("Vote{%v:%X %v/%02d/%v(%v) %X %X %X @ %s [%s]}",
 		vote.ValidatorIndex,
 		cmtbytes.Fingerprint(vote.ValidatorAddress),
 		vote.Height,
@@ -204,6 +241,7 @@ func (vote *Vote) String() string {
 		cmtbytes.Fingerprint(vote.Signature),
 		cmtbytes.Fingerprint(vote.Extension),
 		CanonicalTime(vote.Timestamp),
+		sideTxResults,
 	)
 }
 
@@ -304,42 +342,11 @@ func (vote *Vote) ValidateBasic() error {
 		return errors.New("signature is missing")
 	}
 
-	if len(vote.Signature) > MaxSignatureSize {
-		return fmt.Errorf("signature is too big (max: %d)", MaxSignatureSize)
-	}
-
-	// We should only ever see vote extensions in non-nil precommits, otherwise
-	// this is a violation of the specification.
-	// https://github.com/tendermint/tendermint/issues/8487
-	if vote.Type != cmtproto.PrecommitType || vote.BlockID.IsZero() {
-		if len(vote.Extension) > 0 {
-			return fmt.Errorf(
-				"unexpected vote extension; vote type %d, isNil %t",
-				vote.Type, vote.BlockID.IsZero(),
-			)
-		}
-		if len(vote.ExtensionSignature) > 0 {
-			return errors.New("unexpected vote extension signature")
-		}
-	}
-
-	if vote.Type == cmtproto.PrecommitType && !vote.BlockID.IsZero() {
-		// It's possible that this vote has vote extensions but
-		// they could also be disabled and thus not present thus
-		// we can't do all checks
-		if len(vote.ExtensionSignature) > MaxSignatureSize {
-			return fmt.Errorf("vote extension signature is too big (max: %d)", MaxSignatureSize)
-		}
-
-		// NOTE: extended votes should have a signature regardless of
-		// of whether there is any data in the extension or not however
-		// we don't know if extensions are enabled so we can only
-		// enforce the signature when extension size is not nil
-		if len(vote.ExtensionSignature) == 0 && len(vote.Extension) != 0 {
-			return fmt.Errorf("vote extension signature absent on vote with extension")
-		}
-	}
-
+	// TODO(@raneet10): ensure skipping signature check is innocuous.
+	// Also need to know how upstream would handle these checks for different keys (should be trivial but better to confirm).
+	// if len(vote.Signature) > MaxSignatureSize {
+	// 	return fmt.Errorf("Signature is too big (max: %d)", MaxSignatureSize)
+	// }
 	return nil
 }
 

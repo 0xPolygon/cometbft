@@ -10,7 +10,7 @@ import (
 
 	secp256k1 "github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/ecdsa"
-	"golang.org/x/crypto/ripemd160" //nolint: staticcheck // necessary for Bitcoin address format
+	ethCrypto "github.com/ethereum/go-ethereum/crypto"
 
 	"github.com/cometbft/cometbft/crypto"
 	cmtjson "github.com/cometbft/cometbft/libs/json"
@@ -26,70 +26,86 @@ const (
 )
 
 func init() {
-	cmtjson.RegisterType(PubKey{}, PubKeyName)
-	cmtjson.RegisterType(PrivKey{}, PrivKeyName)
+	cmtjson.RegisterType(PubKeySecp256k1{}, PubKeyName)
+	cmtjson.RegisterType(PrivKeySecp256k1{}, PrivKeyName)
 }
 
-var _ crypto.PrivKey = PrivKey{}
+var _ crypto.PrivKey = PrivKeySecp256k1{}
 
 // PrivKey implements PrivKey.
-type PrivKey []byte
+type PrivKeySecp256k1 []byte
 
 // Bytes marshalls the private key using amino encoding.
-func (privKey PrivKey) Bytes() []byte {
+func (privKey PrivKeySecp256k1) Bytes() []byte {
 	return []byte(privKey)
 }
 
 // PubKey performs the point-scalar multiplication from the privKey on the
 // generator point to get the pubkey.
-func (privKey PrivKey) PubKey() crypto.PubKey {
-	_, pubkeyObject := secp256k1.PrivKeyFromBytes(privKey)
+func (privKey PrivKeySecp256k1) PubKey() crypto.PubKey {
+	privateObject, err := ethCrypto.ToECDSA(privKey[:])
+	if err != nil {
+		panic(err)
+	}
 
-	pk := pubkeyObject.SerializeCompressed()
+	var pubkeyBytes PubKeySecp256k1
+	copy(pubkeyBytes[:], ethCrypto.FromECDSAPub(&privateObject.PublicKey))
+	return pubkeyBytes
 
-	return PubKey(pk)
+	// _, pubkeyObject := secp256k1.PrivKeyFromBytes(secp256k1.S256(), privKey[:])
+	// var pubkeyBytes PubKeySecp256k1
+	// copy(pubkeyBytes[:], pubkeyObject.SerializeCompressed())
+	// return pubkeyBytes
 }
 
 // Equals - you probably don't need to use this.
 // Runs in constant time based on length of the keys.
-func (privKey PrivKey) Equals(other crypto.PrivKey) bool {
-	if otherSecp, ok := other.(PrivKey); ok {
+func (privKey PrivKeySecp256k1) Equals(other crypto.PrivKey) bool {
+	if otherSecp, ok := other.(PrivKeySecp256k1); ok {
 		return subtle.ConstantTimeCompare(privKey[:], otherSecp[:]) == 1
 	}
 	return false
 }
 
-func (privKey PrivKey) Type() string {
+func (privKey PrivKeySecp256k1) Type() string {
 	return KeyType
 }
 
 // GenPrivKey generates a new ECDSA private key on curve secp256k1 private key.
 // It uses OS randomness to generate the private key.
-func GenPrivKey() PrivKey {
+func GenPrivKey() PrivKeySecp256k1 {
 	return genPrivKey(crypto.CReader())
 }
 
 // genPrivKey generates a new secp256k1 private key using the provided reader.
-func genPrivKey(rand io.Reader) PrivKey {
-	var privKeyBytes [PrivKeySize]byte
-	d := new(big.Int)
+func genPrivKey(rand io.Reader) PrivKeySecp256k1 {
+	// var privKeyBytes [32]byte
+	// d := new(big.Int)
+	// for {
+	// 	privKeyBytes = [32]byte{}
+	// 	_, err := io.ReadFull(rand, privKeyBytes[:])
+	// 	if err != nil {
+	// 		panic(err)
+	// 	}
 
-	for {
-		privKeyBytes = [PrivKeySize]byte{}
-		_, err := io.ReadFull(rand, privKeyBytes[:])
-		if err != nil {
-			panic(err)
-		}
+	// 	d.SetBytes(privKeyBytes[:])
+	// 	// break if we found a valid point (i.e. > 0 and < N == curverOrder)
+	// 	isValidFieldElement := 0 < d.Sign() && d.Cmp(secp256k1.S256().N) < 0
+	// 	if isValidFieldElement {
+	// 		break
+	// 	}
+	// }
 
-		d.SetBytes(privKeyBytes[:])
-		// break if we found a valid point (i.e. > 0 and < N == curverOrder)
-		isValidFieldElement := 0 < d.Sign() && d.Cmp(secp256k1.S256().N) < 0
-		if isValidFieldElement {
-			break
-		}
+	// return PrivKeySecp256k1(privKeyBytes)
+
+	privKeyBytes := []byte{}
+	_, err := io.ReadFull(rand, privKeyBytes[:])
+	if err != nil {
+		panic(err)
 	}
-
-	return PrivKey(privKeyBytes[:])
+	// crypto.CRandBytes is guaranteed to be 32 bytes long, so it can be
+	// casted to PrivKeySecp256k1.
+	return PrivKeySecp256k1(privKeyBytes)
 }
 
 var one = new(big.Int).SetInt64(1)
@@ -104,7 +120,7 @@ var one = new(big.Int).SetInt64(1)
 //
 // NOTE: secret should be the output of a KDF like bcrypt,
 // if it's derived from user input.
-func GenPrivKeySecp256k1(secret []byte) PrivKey {
+func GenPrivKeySecp256k1(secret []byte) PrivKeySecp256k1 {
 	secHash := sha256.Sum256(secret)
 	// to guarantee that we have a valid field element, we use the approach of:
 	// "Suite B Implementer’s Guide to FIPS 186-3", A.2.1
@@ -120,76 +136,75 @@ func GenPrivKeySecp256k1(secret []byte) PrivKey {
 	// copy feB over to fixed 32 byte privKey32 and pad (if necessary)
 	copy(privKey32[32-len(feB):32], feB)
 
-	return PrivKey(privKey32)
+	return PrivKeySecp256k1(privKey32)
 }
 
 // Sign creates an ECDSA signature on curve Secp256k1, using SHA256 on the msg.
 // The returned signature will be of the form R || S (in lower-S form).
-func (privKey PrivKey) Sign(msg []byte) ([]byte, error) {
-	priv, _ := secp256k1.PrivKeyFromBytes(privKey)
+// func (privKey PrivKeySecp256k1) Sign(msg []byte) ([]byte, error) {
+// 	priv, _ := secp256k1.PrivKeyFromBytes(privKey)
 
-	sig, err := ecdsa.SignCompact(priv, crypto.Sha256(msg), false)
-	if err != nil {
-		return nil, err
-	}
+// 	sig, err := ecdsa.SignCompact(priv, crypto.Sha256(msg), false)
+// 	if err != nil {
+// 		return nil, err
+// 	}
 
-	// remove the first byte which is compactSigRecoveryCode
-	return sig[1:], nil
-}
+// 	// remove the first byte which is compactSigRecoveryCode
+// 	return sig[1:], nil
+// }
 
 //-------------------------------------
 
-var _ crypto.PubKey = PubKey{}
+var _ crypto.PubKey = PubKeySecp256k1{}
 
 // PubKeySize is comprised of 32 bytes for one field element
 // (the x-coordinate), plus one byte for the parity of the y-coordinate.
-const PubKeySize = 33
+// const PubKeySecp256k1Size = 33
+const PubKeySecp256k1Size = 65
 
 // PubKey implements crypto.PubKey.
 // It is the compressed form of the pubkey. The first byte depends is a 0x02 byte
 // if the y-coordinate is the lexicographically largest of the two associated with
 // the x-coordinate. Otherwise the first byte is a 0x03.
 // This prefix is followed with the x-coordinate.
-type PubKey []byte
+type PubKeySecp256k1 []byte
 
 // Address returns a Bitcoin style addresses: RIPEMD160(SHA256(pubkey))
-func (pubKey PubKey) Address() crypto.Address {
-	if len(pubKey) != PubKeySize {
-		panic("length of pubkey is incorrect")
-	}
-	hasherSHA256 := sha256.New()
-	_, _ = hasherSHA256.Write(pubKey) // does not error
-	sha := hasherSHA256.Sum(nil)
+func (pubKey PubKeySecp256k1) Address() crypto.Address {
+	// hasherSHA256 := sha256.New()
+	// hasherSHA256.Write(pubKey[:]) // does not error
+	// sha := hasherSHA256.Sum(nil)
 
-	hasherRIPEMD160 := ripemd160.New()
-	_, _ = hasherRIPEMD160.Write(sha) // does not error
+	// hasherRIPEMD160 := ripemd160.New()
+	// hasherRIPEMD160.Write(sha) // does not error
+	// return crypto.Address(hasherRIPEMD160.Sum(nil))
+	return crypto.Address(ethCrypto.Keccak256(pubKey[1:])[12:])
 
-	return crypto.Address(hasherRIPEMD160.Sum(nil))
 }
 
 // Bytes returns the pubkey marshaled with amino encoding.
-func (pubKey PubKey) Bytes() []byte {
+func (pubKey PubKeySecp256k1) Bytes() []byte {
 	return []byte(pubKey)
 }
 
-func (pubKey PubKey) String() string {
+func (pubKey PubKeySecp256k1) String() string {
 	return fmt.Sprintf("PubKeySecp256k1{%X}", []byte(pubKey))
 }
 
-func (pubKey PubKey) Equals(other crypto.PubKey) bool {
-	if otherSecp, ok := other.(PubKey); ok {
+func (pubKey PubKeySecp256k1) Equals(other crypto.PubKey) bool {
+	if otherSecp, ok := other.(PubKeySecp256k1); ok {
 		return bytes.Equal(pubKey[:], otherSecp[:])
 	}
 	return false
 }
 
-func (pubKey PubKey) Type() string {
+func (pubKey PubKeySecp256k1) Type() string {
 	return KeyType
 }
 
 // VerifySignature verifies a signature of the form R || S.
 // It rejects signatures which are not in lower-S form.
-func (pubKey PubKey) VerifySignature(msg []byte, sigStr []byte) bool {
+func (pubKey PubKeySecp256k1) VerifySignature(msg []byte, sigStr []byte) bool {
 	if len(sigStr) != 64 {
 		return false
 	}

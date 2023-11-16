@@ -151,6 +151,11 @@ func (pv *ErroringMockPV) SignProposal(string, *cmtproto.Proposal) error {
 	return ErroringMockPVErr
 }
 
+// Implements PrivValidator.
+func (pv *ErroringMockPV) SignBytes(data []byte) ([]byte, error) {
+	return nil, ErroringMockPVErr
+}
+
 // NewErroringMockPV returns a MockPV that fails on each signing request. Again, for testing only.
 
 func NewErroringMockPV() *ErroringMockPV {

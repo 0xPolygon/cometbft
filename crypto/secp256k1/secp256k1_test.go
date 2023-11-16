@@ -36,14 +36,14 @@ func TestPubKeySecp256k1Address(t *testing.T) {
 		addrBbz, _, _ := base58.CheckDecode(d.addr)
 		addrB := crypto.Address(addrBbz)
 
-		priv := secp256k1.PrivKey(privB)
+		priv := secp256k1.PrivKeySecp256k1(privB)
 
 		pubKey := priv.PubKey()
-		pubT, _ := pubKey.(secp256k1.PubKey)
+		pubT, _ := pubKey.(secp256k1.PubKeySecp256k1)
 		pub := pubT
 		addr := pubKey.Address()
 
-		assert.Equal(t, pub, secp256k1.PubKey(pubB), "Expected pub keys to match")
+		assert.Equal(t, pub, secp256k1.PubKeySecp256k1(pubB), "Expected pub keys to match")
 		assert.Equal(t, addr, addrB, "Expected addresses to match")
 	}
 }

@@ -117,3 +117,13 @@ func (BaseApplication) FinalizeBlock(_ context.Context, req *RequestFinalizeBloc
 		TxResults: txs,
 	}, nil
 }
+
+// func (app *GRPCApplication) BeginSideBlock(ctx context.Context, req *RequestBeginSideBlock) (*ResponseBeginSideBlock, error) {
+// 	res := app.app.BeginSideBlock(*req)
+// 	return &res, nil
+// }
+
+// func (app *GRPCApplication) DeliverSideTx(ctx context.Context, req *RequestDeliverSideTx) (*ResponseDeliverSideTx, error) {
+// 	res := app.app.DeliverSideTx(*req)
+// 	return &res, nil
+// }

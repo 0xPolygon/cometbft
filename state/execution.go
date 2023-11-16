@@ -43,6 +43,9 @@ type BlockExecutor struct {
 	logger log.Logger
 
 	metrics *Metrics
+
+	// [peppermint] fast sync
+	fastSyncFunc func() bool
 }
 
 type BlockExecutorOption func(executor *BlockExecutor)
@@ -288,6 +291,9 @@ func (blockExec *BlockExecutor) ApplyBlock(
 
 	fail.Fail() // XXX
 
+	// Save side tx responses
+	// state.SideTxResponses = sideTxResponses
+
 	// Update the app hash and save the state.
 	state.AppHash = abciResponse.AppHash
 	if err := blockExec.store.Save(state); err != nil {
@@ -445,6 +451,12 @@ func buildLastCommitInfo(block *types.Block, store Store, initialHeight int64) a
 		))
 	}
 
+	// abciResponses.BeginBlock.Events = append(abciResponses.BeginBlock.Events, sideBlockResponse.Events...)
+
+	//
+	// Deliver tx
+	//
+
 	votes := make([]abci.VoteInfo, block.LastCommit.Size())
 	for i, val := range lastValSet.Validators {
 		commitSig := block.LastCommit.Signatures[i]
@@ -453,6 +465,10 @@ func buildLastCommitInfo(block *types.Block, store Store, initialHeight int64) a
 			BlockIdFlag: cmtproto.BlockIDFlag(commitSig.BlockIDFlag),
 		}
 	}
+
+	//
+	// End block
+	//
 
 	return abci.CommitInfo{
 		Round: block.LastCommit.Round,

@@ -605,9 +605,8 @@ func DefaultP2PConfig() *P2PConfig {
 		ExternalAddress:              "",
 		AddrBook:                     defaultAddrBookPath,
 		AddrBookStrict:               true,
-		MaxNumInboundPeers:           40,
-		MaxNumOutboundPeers:          10,
-		PersistentPeersMaxDialPeriod: 0 * time.Second,
+		MaxNumInboundPeers:           100,
+		MaxNumOutboundPeers:          100,
 		FlushThrottleTimeout:         100 * time.Millisecond,
 		MaxPacketMsgPayloadSize:      1024,    // 1 kB
 		SendRate:                     5120000, // 5 mB/s
@@ -620,6 +619,7 @@ func DefaultP2PConfig() *P2PConfig {
 		TestDialFail:                 false,
 		TestFuzz:                     false,
 		TestFuzzConfig:               DefaultFuzzConnConfig(),
+		PersistentPeersMaxDialPeriod: 0 * time.Second,
 	}
 }
 

@@ -1612,6 +1612,9 @@ func (m *NewValidBlockMessage) ValidateBasic() error {
 	if m.BlockParts.Size() > int(types.MaxBlockPartsCount) {
 		return fmt.Errorf("blockParts bit array is too big: %d, max: %d", m.BlockParts.Size(), types.MaxBlockPartsCount)
 	}
+	if m.BlockParts.Size() > int(types.MaxBlockPartsCount) {
+		return fmt.Errorf("BlockParts bit array is too big: %d, max: %d", m.BlockParts.Size(), types.MaxBlockPartsCount)
+	}
 	return nil
 }
 
@@ -1660,6 +1663,9 @@ func (m *ProposalPOLMessage) ValidateBasic() error {
 	}
 	if m.ProposalPOL.Size() > types.MaxVotesCount {
 		return fmt.Errorf("proposalPOL bit array is too big: %d, max: %d", m.ProposalPOL.Size(), types.MaxVotesCount)
+	}
+	if m.ProposalPOL.Size() > types.MaxVotesCount {
+		return fmt.Errorf("ProposalPOL bit array is too big: %d, max: %d", m.ProposalPOL.Size(), types.MaxVotesCount)
 	}
 	return nil
 }

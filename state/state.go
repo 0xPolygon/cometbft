@@ -77,6 +77,9 @@ type State struct {
 
 	// the latest AppHash we've received from calling abci.Commit()
 	AppHash []byte
+
+	// [peppermint] side tx responses
+	SideTxResponses []*types.SideTxResultWithData
 }
 
 // Copy makes a copy of the State for mutating.
@@ -102,6 +105,9 @@ func (state State) Copy() State {
 		AppHash: state.AppHash,
 
 		LastResultsHash: state.LastResultsHash,
+
+		// [peppermint] side tx responses
+		SideTxResponses: state.SideTxResponses,
 	}
 }
 
