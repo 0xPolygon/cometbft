@@ -48,9 +48,8 @@ func (privKey PrivKeySecp256k1) PubKey() crypto.PubKey {
 		panic(err)
 	}
 
-	var pubkeyBytes PubKeySecp256k1
-	copy(pubkeyBytes[:], ethCrypto.FromECDSAPub(&privateObject.PublicKey))
-	return pubkeyBytes
+	pubKeyBytes := ethCrypto.FromECDSAPub(&privateObject.PublicKey)
+	return PubKeySecp256k1(pubKeyBytes)
 
 	// _, pubkeyObject := secp256k1.PrivKeyFromBytes(secp256k1.S256(), privKey[:])
 	// var pubkeyBytes PubKeySecp256k1
@@ -98,14 +97,14 @@ func genPrivKey(rand io.Reader) PrivKeySecp256k1 {
 
 	// return PrivKeySecp256k1(privKeyBytes)
 
-	privKeyBytes := []byte{}
+	privKeyBytes := [PrivKeySize]byte{}
 	_, err := io.ReadFull(rand, privKeyBytes[:])
 	if err != nil {
 		panic(err)
 	}
 	// crypto.CRandBytes is guaranteed to be 32 bytes long, so it can be
 	// casted to PrivKeySecp256k1.
-	return PrivKeySecp256k1(privKeyBytes)
+	return PrivKeySecp256k1(privKeyBytes[:])
 }
 
 var one = new(big.Int).SetInt64(1)
@@ -205,30 +204,24 @@ func (pubKey PubKeySecp256k1) Type() string {
 // VerifySignature verifies a signature of the form R || S.
 // It rejects signatures which are not in lower-S form.
 func (pubKey PubKeySecp256k1) VerifySignature(msg []byte, sigStr []byte) bool {
-	if len(sigStr) != 64 {
-		return false
-	}
+	// if len(sigStr) != 64 {
+	// 	return false
+	// }
+	// pub, err := secp256k1.ParsePubKey(pubKey[:], secp256k1.S256())
+	// if err != nil {
+	// 	return false
+	// }
+	// // parse the signature:
+	// signature := signatureFromBytes(sigStr)
+	// // Reject malleable signatures. libsecp256k1 does this check but btcec doesn't.
+	// // see: https://github.com/ethereum/go-ethereum/blob/f9401ae011ddf7f8d2d95020b7446c17f8d98dc1/crypto/signature_nocgo.go#L90-L93
+	// if signature.S.Cmp(secp256k1halfN) > 0 {
+	// 	return false
+	// }
+	hash := ethCrypto.Keccak256(msg)
+	return ethCrypto.VerifySignature(pubKey[:], hash, sigStr[:64])
+	// return signature.Verify(crypto.Sha256(msg), pub)
 
-	pub, err := secp256k1.ParsePubKey(pubKey)
-	if err != nil {
-		return false
-	}
-
-	// parse the signature:
-	signature := signatureFromBytes(sigStr)
-	// Reject malleable signatures. libsecp256k1 does this check but btcec doesn't.
-	// see: https://github.com/ethereum/go-ethereum/blob/f9401ae011ddf7f8d2d95020b7446c17f8d98dc1/crypto/signature_nocgo.go#L90-L93
-	// Serialize() would negate S value if it is over half order.
-	// Hence, if the signature is different after Serialize() if should be rejected.
-	var modifiedSignature, parseErr = ecdsa.ParseDERSignature(signature.Serialize())
-	if parseErr != nil {
-		return false
-	}
-	if !signature.IsEqual(modifiedSignature) {
-		return false
-	}
-
-	return signature.Verify(crypto.Sha256(msg), pub)
 }
 
 // Read Signature struct from R || S. Caller needs to ensure

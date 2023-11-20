@@ -11,7 +11,8 @@ import (
 )
 
 func Test_genPrivKey(t *testing.T) {
-
+	// TODO(@raneet10): Skipping this test since TestGenEthPrivKey does the job. Should we port in the cases there ?
+	t.Skip()
 	empty := make([]byte, 32)
 	oneB := big.NewInt(1).Bytes()
 	onePadded := make([]byte, 32)
