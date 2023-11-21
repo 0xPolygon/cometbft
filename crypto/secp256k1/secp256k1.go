@@ -101,31 +101,23 @@ func GenPrivKey() PrivKey {
 
 // genPrivKey generates a new secp256k1 private key using the provided reader.
 func genPrivKey(rand io.Reader) PrivKey {
-	// var privKeyBytes [PrivKeySize]byte
-	// d := new(big.Int)
+	var privKeyBytes [PrivKeySize]byte
+	d := new(big.Int)
 
-	// for {
-	// 	privKeyBytes = [PrivKeySize]byte{}
-	// 	_, err := io.ReadFull(rand, privKeyBytes[:])
-	// 	if err != nil {
-	// 		panic(err)
-	// 	}
+	for {
+		_, err := io.ReadFull(rand, privKeyBytes[:])
+		if err != nil {
+			panic(err)
+		}
 
-	// 	d.SetBytes(privKeyBytes[:])
-	// 	// break if we found a valid point (i.e. > 0 and < N == curverOrder)
-	// 	isValidFieldElement := 0 < d.Sign() && d.Cmp(secp256k1.S256().N) < 0
-	// 	if isValidFieldElement {
-	// 		break
-	// 	}
-	// }
-
-	// return PrivKey(privKeyBytes[:])
-
-	privKeyBytes := [PrivKeySize]byte{}
-	_, err := io.ReadFull(rand, privKeyBytes[:])
-	if err != nil {
-		panic(err)
+		d.SetBytes(privKeyBytes[:])
+		// break if we found a valid point (i.e. > 0 and < N == curveOrder)
+		isValidFieldElement := 0 < d.Sign() && d.Cmp(secp256k1.S256().N) < 0
+		if isValidFieldElement {
+			break
+		}
 	}
+
 	// crypto.CRandBytes is guaranteed to be 32 bytes long, so it can be
 	// casted to PrivKey.
 	return PrivKey(privKeyBytes[:])
