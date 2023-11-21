@@ -18,22 +18,45 @@ import (
 
 // -------------------------------------
 const (
-	PrivKeyName = "tendermint/PrivKeySecp256k1"
-	PubKeyName  = "tendermint/PubKeySecp256k1"
+	PrivKeyNameOld = "tendermint/PrivKeySecp256k1"
+	PubKeyNameOld  = "tendermint/PubKeySecp256k1"
+	PrivKeyName    = "comet/PrivKeySecp256k1Uncompressed"
+	PubKeyName     = "comet/PubKeySecp256k1Uncompressed"
 
 	KeyType     = "secp256k1"
 	PrivKeySize = 32
 )
 
 func init() {
-	cmtjson.RegisterType(PubKeySecp256k1{}, PubKeyName)
-	cmtjson.RegisterType(PrivKeySecp256k1{}, PrivKeyName)
+	cmtjson.RegisterType(PubKey{}, PubKeyName)
+	cmtjson.RegisterType(PrivKey{}, PrivKeyName)
+	cmtjson.RegisterType(PubKeyOld{}, PubKeyNameOld)
+	cmtjson.RegisterType(PrivKeyOld{}, PrivKeyNameOld)
 }
 
-var _ crypto.PrivKey = PrivKeySecp256k1{}
+var _ crypto.PrivKey = PrivKey{}
+var _ crypto.PrivKey = PrivKeyOld{}
 
 // PrivKey implements PrivKey.
-type PrivKeySecp256k1 []byte
+type PrivKey []byte
+
+type PrivKeyOld []byte
+
+func (privKey PrivKeyOld) Bytes() []byte {
+	return PrivKey(privKey).Bytes()
+}
+func (privKey PrivKeyOld) PubKey() crypto.PubKey {
+	return PrivKey(privKey).PubKey()
+}
+func (privKey PrivKeyOld) Equals(other crypto.PrivKey) bool {
+	return PrivKey(privKey).Equals(other)
+}
+func (privKey PrivKeyOld) Type() string {
+	return PrivKey(privKey).Type()
+}
+func (privKey PrivKeyOld) Sign(msg []byte) ([]byte, error) {
+	return PrivKey(privKey).Sign(msg)
+}
 
 // Bytes marshalls the private key using amino encoding.
 func (privKey PrivKeySecp256k1) Bytes() []byte {
@@ -42,19 +65,19 @@ func (privKey PrivKeySecp256k1) Bytes() []byte {
 
 // PubKey performs the point-scalar multiplication from the privKey on the
 // generator point to get the pubkey.
-func (privKey PrivKeySecp256k1) PubKey() crypto.PubKey {
-	privateObject, err := ethCrypto.ToECDSA(privKey[:])
+func (privKey PrivKey) PubKey() crypto.PubKey {
+	privateObject, err := ethCrypto.ToECDSA(privKey)
 	if err != nil {
 		panic(err)
 	}
 
-	pubKeyBytes := ethCrypto.FromECDSAPub(&privateObject.PublicKey)
-	return PubKeySecp256k1(pubKeyBytes)
+	pk := ethCrypto.FromECDSAPub(&privateObject.PublicKey)
+	return PubKey(pk)
 
-	// _, pubkeyObject := secp256k1.PrivKeyFromBytes(secp256k1.S256(), privKey[:])
-	// var pubkeyBytes PubKeySecp256k1
-	// copy(pubkeyBytes[:], pubkeyObject.SerializeCompressed())
-	// return pubkeyBytes
+	// _, pubkeyObject := secp256k1.PrivKeyFromBytes(privKey)
+
+	// pk := pubkeyObject.SerializeCompressed()
+	// return PubKey(pk)
 }
 
 // Equals - you probably don't need to use this.
@@ -97,14 +120,23 @@ func genPrivKey(rand io.Reader) PrivKeySecp256k1 {
 
 	// return PrivKeySecp256k1(privKeyBytes)
 
-	privKeyBytes := [PrivKeySize]byte{}
-	_, err := io.ReadFull(rand, privKeyBytes[:])
-	if err != nil {
-		panic(err)
+	for {
+		_, err := io.ReadFull(rand, privKeyBytes[:])
+		if err != nil {
+			panic(err)
+		}
+
+		d.SetBytes(privKeyBytes[:])
+		// break if we found a valid point (i.e. > 0 and < N == curveOrder)
+		isValidFieldElement := 0 < d.Sign() && d.Cmp(secp256k1.S256().N) < 0
+		if isValidFieldElement {
+			break
+		}
 	}
+
 	// crypto.CRandBytes is guaranteed to be 32 bytes long, so it can be
-	// casted to PrivKeySecp256k1.
-	return PrivKeySecp256k1(privKeyBytes[:])
+	// casted to PrivKey.
+	return PrivKey(privKeyBytes[:])
 }
 
 var one = new(big.Int).SetInt64(1)
@@ -140,45 +172,77 @@ func GenPrivKeySecp256k1(secret []byte) PrivKeySecp256k1 {
 
 // Sign creates an ECDSA signature on curve Secp256k1, using SHA256 on the msg.
 // The returned signature will be of the form R || S (in lower-S form).
-// func (privKey PrivKeySecp256k1) Sign(msg []byte) ([]byte, error) {
-// 	priv, _ := secp256k1.PrivKeyFromBytes(privKey)
+func (privKey PrivKey) Sign(msg []byte) ([]byte, error) {
+	// [peppermint] sign with ethcrypto
+	// priv, _ := secp256k1.PrivKeyFromBytes(privKey)
 
-// 	sig, err := ecdsa.SignCompact(priv, crypto.Sha256(msg), false)
-// 	if err != nil {
-// 		return nil, err
-// 	}
+	// sig, err := ecdsa.SignCompact(priv, crypto.Sha256(msg), false)
+	privateObject, err := ethCrypto.ToECDSA(privKey)
+	if err != nil {
+		return nil, err
+	}
 
-// 	// remove the first byte which is compactSigRecoveryCode
-// 	return sig[1:], nil
-// }
+	// // remove the first byte which is compactSigRecoveryCode
+	// return sig[1:], nil
+	return ethCrypto.Sign(ethCrypto.Keccak256(msg), privateObject)
+}
 
 //-------------------------------------
 
-var _ crypto.PubKey = PubKeySecp256k1{}
+var _ crypto.PubKey = PubKey{}
+var _ crypto.PubKey = PubKeyOld{}
 
 // PubKeySize is comprised of 32 bytes for one field element
 // (the x-coordinate), plus one byte for the parity of the y-coordinate.
-// const PubKeySecp256k1Size = 33
-const PubKeySecp256k1Size = 65
+// const PubKeySize = 33
+const PubKeySize = 65
 
 // PubKey implements crypto.PubKey.
 // It is the compressed form of the pubkey. The first byte depends is a 0x02 byte
 // if the y-coordinate is the lexicographically largest of the two associated with
 // the x-coordinate. Otherwise the first byte is a 0x03.
 // This prefix is followed with the x-coordinate.
-type PubKeySecp256k1 []byte
+type PubKey []byte
+type PubKeyOld []byte
+
+func (pubKey PubKeyOld) Address() crypto.Address {
+	return PubKey(pubKey).Address()
+}
+
+func (pubKey PubKeyOld) Bytes() []byte {
+	return PubKey(pubKey).Bytes()
+}
+
+func (pubKey PubKeyOld) String() string {
+	return PubKey(pubKey).String()
+}
+
+func (pubKey PubKeyOld) Equals(other crypto.PubKey) bool {
+	return PubKey(pubKey).Equals(other)
+}
+
+func (pubKey PubKeyOld) Type() string {
+	return PubKey(pubKey).Type()
+}
+
+func (pubKey PubKeyOld) VerifySignature(msg []byte, sigStr []byte) bool {
+	return PubKey(pubKey).VerifySignature(msg, sigStr)
+}
 
 // Address returns a Bitcoin style addresses: RIPEMD160(SHA256(pubkey))
-func (pubKey PubKeySecp256k1) Address() crypto.Address {
+func (pubKey PubKey) Address() crypto.Address {
+	if len(pubKey) != PubKeySize {
+		panic(fmt.Sprintf("length of pubkey is incorrect %d != %d", len(pubKey), PubKeySize))
+	}
 	// hasherSHA256 := sha256.New()
-	// hasherSHA256.Write(pubKey[:]) // does not error
+	// _, _ = hasherSHA256.Write(pubKey) // does not error
 	// sha := hasherSHA256.Sum(nil)
 
 	// hasherRIPEMD160 := ripemd160.New()
-	// hasherRIPEMD160.Write(sha) // does not error
+	// _, _ = hasherRIPEMD160.Write(sha) // does not error
+
 	// return crypto.Address(hasherRIPEMD160.Sum(nil))
 	return crypto.Address(ethCrypto.Keccak256(pubKey[1:])[12:])
-
 }
 
 // Bytes returns the pubkey marshaled with amino encoding.
@@ -203,25 +267,34 @@ func (pubKey PubKeySecp256k1) Type() string {
 
 // VerifySignature verifies a signature of the form R || S.
 // It rejects signatures which are not in lower-S form.
-func (pubKey PubKeySecp256k1) VerifySignature(msg []byte, sigStr []byte) bool {
+func (pubKey PubKey) VerifySignature(msg []byte, sigStr []byte) bool {
 	// if len(sigStr) != 64 {
 	// 	return false
 	// }
-	// pub, err := secp256k1.ParsePubKey(pubKey[:], secp256k1.S256())
+
+	// pub, err := secp256k1.ParsePubKey(pubKey)
 	// if err != nil {
 	// 	return false
 	// }
+
 	// // parse the signature:
 	// signature := signatureFromBytes(sigStr)
 	// // Reject malleable signatures. libsecp256k1 does this check but btcec doesn't.
 	// // see: https://github.com/ethereum/go-ethereum/blob/f9401ae011ddf7f8d2d95020b7446c17f8d98dc1/crypto/signature_nocgo.go#L90-L93
-	// if signature.S.Cmp(secp256k1halfN) > 0 {
+	// // Serialize() would negate S value if it is over half order.
+	// // Hence, if the signature is different after Serialize() if should be rejected.
+	// var modifiedSignature, parseErr = ecdsa.ParseDERSignature(signature.Serialize())
+	// if parseErr != nil {
 	// 	return false
 	// }
-	hash := ethCrypto.Keccak256(msg)
-	return ethCrypto.VerifySignature(pubKey[:], hash, sigStr[:64])
-	// return signature.Verify(crypto.Sha256(msg), pub)
+	// if !signature.IsEqual(modifiedSignature) {
+	// 	return false
+	// }
 
+	hash := ethCrypto.Keccak256(msg)
+	return ethCrypto.VerifySignature(pubKey, hash, sigStr[:64])
+
+	// return signature.Verify(crypto.Sha256(msg), pub)
 }
 
 // Read Signature struct from R || S. Caller needs to ensure
