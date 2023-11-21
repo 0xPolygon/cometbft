@@ -220,17 +220,7 @@ func (vote *Vote) String() string {
 		panic("Unknown vote type")
 	}
 
-	// TODO(@raneet10): to be eventually removed
-	sideTxResults := "Proposals "
-	if len(vote.SideTxResults) > 0 {
-		for _, s := range vote.SideTxResults {
-			sideTxResults += s.String()
-		}
-	} else {
-		sideTxResults = "no-proposals"
-	}
-
-	return fmt.Sprintf("Vote{%v:%X %v/%02d/%v(%v) %X %X %X @ %s [%s]}",
+	return fmt.Sprintf("Vote{%v:%X %v/%02d/%v(%v) %X %X %X @ %s}",
 		vote.ValidatorIndex,
 		cmtbytes.Fingerprint(vote.ValidatorAddress),
 		vote.Height,
@@ -241,7 +231,7 @@ func (vote *Vote) String() string {
 		cmtbytes.Fingerprint(vote.Signature),
 		cmtbytes.Fingerprint(vote.Extension),
 		CanonicalTime(vote.Timestamp),
-		sideTxResults,
+		// sideTxResults,
 	)
 }
 
@@ -347,6 +337,39 @@ func (vote *Vote) ValidateBasic() error {
 	// if len(vote.Signature) > MaxSignatureSize {
 	// 	return fmt.Errorf("Signature is too big (max: %d)", MaxSignatureSize)
 	// }
+
+	// We should only ever see vote extensions in non-nil precommits, otherwise
+	// this is a violation of the specification.
+	// https://github.com/tendermint/tendermint/issues/8487
+	if vote.Type != cmtproto.PrecommitType || vote.BlockID.IsZero() {
+		if len(vote.Extension) > 0 {
+			return fmt.Errorf(
+				"unexpected vote extension; vote type %d, isNil %t",
+				vote.Type, vote.BlockID.IsZero(),
+			)
+		}
+		if len(vote.ExtensionSignature) > 0 {
+			return errors.New("unexpected vote extension signature")
+		}
+	}
+
+	if vote.Type == cmtproto.PrecommitType && !vote.BlockID.IsZero() {
+		// It's possible that this vote has vote extensions but
+		// they could also be disabled and thus not present thus
+		// we can't do all checks
+		if len(vote.ExtensionSignature) > MaxSignatureSize {
+			return fmt.Errorf("vote extension signature is too big (max: %d)", MaxSignatureSize)
+		}
+
+		// NOTE: extended votes should have a signature regardless of
+		// of whether there is any data in the extension or not however
+		// we don't know if extensions are enabled so we can only
+		// enforce the signature when extension size is not nil
+		if len(vote.ExtensionSignature) == 0 && len(vote.Extension) != 0 {
+			return fmt.Errorf("vote extension signature absent on vote with extension")
+		}
+	}
+
 	return nil
 }
 

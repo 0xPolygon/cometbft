@@ -364,7 +364,8 @@ func TestInvalidVotes(t *testing.T) {
 		{"invalid address", func(v *Vote) { v.ValidatorAddress = make([]byte, 1) }},
 		{"invalid validator index", func(v *Vote) { v.ValidatorIndex = -1 }},
 		{"invalid signature", func(v *Vote) { v.Signature = nil }},
-		{"oversized signature", func(v *Vote) { v.Signature = make([]byte, MaxSignatureSize+1) }},
+		// TODO(@raneet10): Maxsize check for sig is skipped for now. Uncomment when it's brought back
+		// {"oversized signature", func(v *Vote) { v.Signature = make([]byte, MaxSignatureSize+1) }},
 	}
 	for _, tc := range testCases {
 		prevote := examplePrevote()

@@ -205,7 +205,6 @@ func (wal *BaseWAL) WriteSync(msg WALMessage) error {
 
 	if err := wal.Write(msg); err != nil {
 		return err
-		return nil
 	}
 
 	if err := wal.Write(msg); err != nil {
