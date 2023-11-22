@@ -26,7 +26,7 @@ func PubKeyToProto(k crypto.PubKey) (pc.PublicKey, error) {
 				Ed25519: k,
 			},
 		}
-	case secp256k1.PubKeySecp256k1:
+	case secp256k1.PubKey:
 		kp = pc.PublicKey{
 			Sum: &pc.PublicKey_Secp256K1{
 				Secp256K1: k,
@@ -56,11 +56,11 @@ func PubKeyFromProto(k pc.PublicKey) (crypto.PubKey, error) {
 		copy(pk, k.Ed25519)
 		return pk, nil
 	case *pc.PublicKey_Secp256K1:
-		if len(k.Secp256K1) != secp256k1.PubKeySecp256k1Size {
+		if len(k.Secp256K1) != secp256k1.PubKeySize {
 			return nil, fmt.Errorf("invalid size for PubKeySecp256k1. Got %d, expected %d",
-				len(k.Secp256K1), secp256k1.PubKeySecp256k1Size)
+				len(k.Secp256K1), secp256k1.PubKeySize)
 		}
-		pk := make(secp256k1.PubKeySecp256k1, secp256k1.PubKeySecp256k1Size)
+		pk := make(secp256k1.PubKey, secp256k1.PubKeySize)
 		copy(pk, k.Secp256K1)
 		return pk, nil
 	default:

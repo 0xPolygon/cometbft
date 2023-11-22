@@ -10,8 +10,6 @@ import (
 )
 
 func Test_genPrivKey(t *testing.T) {
-	// TODO(@raneet10): Skipping this test since TestGenEthPrivKey does the job. Should we port in the cases there ?
-	t.Skip()
 	empty := make([]byte, 32)
 	oneB := big.NewInt(1).Bytes()
 	onePadded := make([]byte, 32)
@@ -61,9 +59,6 @@ func TestSignatureVerificationAndRejectUpperS(t *testing.T) {
 		require.False(t, s.IsOverHalfOrder())
 
 		pub := priv.PubKey()
-		addr := pub.Address()
-		t.Log("address ", addr)
-
 		require.True(t, pub.VerifySignature(msg, sigStr))
 
 		// malleate:
