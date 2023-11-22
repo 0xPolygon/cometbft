@@ -412,7 +412,8 @@ func TestInvalidPrecommitExtensions(t *testing.T) {
 			v.Extension = []byte("extension")
 			v.ExtensionSignature = nil
 		}},
-		{"oversized vote extension signature", func(v *Vote) { v.ExtensionSignature = make([]byte, MaxSignatureSize+1) }},
+		// TODO(@raneet10): Maxsize check for sig is skipped for now. Uncomment when it's brought back
+		// {"oversized vote extension signature", func(v *Vote) { v.ExtensionSignature = make([]byte, MaxSignatureSize+1) }},
 	}
 	for _, tc := range testCases {
 		precommit := examplePrecommit()
