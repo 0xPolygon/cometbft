@@ -274,6 +274,10 @@ func (pubKey PubKey) VerifySignature(msg []byte, sigStr []byte) bool {
 	// 	return false
 	// }
 
+	if len(sigStr) != 65 {
+		return false
+	}
+
 	hash := ethCrypto.Keccak256(msg)
 	return ethCrypto.VerifySignature(pubKey, hash, sigStr[:64])
 
