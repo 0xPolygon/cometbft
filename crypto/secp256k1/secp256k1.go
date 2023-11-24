@@ -9,8 +9,7 @@ import (
 	"math/big"
 
 	secp256k1 "github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcec/v2/ecdsa"
-	ethCrypto "github.com/ethereum/go-ethereum/crypto"
+	ethCrypto "github.com/ethereum/go-ethereum/crypto" //nolint:depguard
 
 	"github.com/cometbft/cometbft/crypto"
 	cmtjson "github.com/cometbft/cometbft/libs/json"
@@ -279,14 +278,4 @@ func (pubKey PubKey) VerifySignature(msg []byte, sigStr []byte) bool {
 	return ethCrypto.VerifySignature(pubKey, hash, sigStr[:64])
 
 	// return signature.Verify(crypto.Sha256(msg), pub)
-}
-
-// Read Signature struct from R || S. Caller needs to ensure
-// that len(sigStr) == 64.
-func signatureFromBytes(sigStr []byte) *ecdsa.Signature {
-	var r secp256k1.ModNScalar
-	r.SetByteSlice(sigStr[:32])
-	var s secp256k1.ModNScalar
-	s.SetByteSlice(sigStr[32:64])
-	return ecdsa.NewSignature(&r, &s)
 }

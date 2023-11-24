@@ -14,7 +14,7 @@ import (
 )
 
 func TestLoadOrGenNodeKey(t *testing.T) {
-	filePath := filepath.Join(os.TempDir(), cmtrand.Str(12)+"_peer_id.json")
+	filePath := filepath.Join(os.TempDir(), cmtrand.Str(12)+"_peer_id.json") //nolint:goconst
 
 	nodeKey, err := LoadOrGenNodeKey(filePath)
 	assert.Nil(t, err)

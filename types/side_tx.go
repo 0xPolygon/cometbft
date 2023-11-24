@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	cmn "github.com/tendermint/tendermint/libs/common"
+	cmn "github.com/tendermint/tendermint/libs/common" //nolint:depguard
 )
 
 // SideTxResult side tx result for vote

@@ -15,7 +15,7 @@ import (
 	cmtjson "github.com/cometbft/cometbft/libs/json"
 	cmtrand "github.com/cometbft/cometbft/libs/rand"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
-	amino "github.com/tendermint/go-amino"
+	amino "github.com/tendermint/go-amino" //nolint:depguard
 )
 
 // Evidence represents any provable malicious activity by a validator.

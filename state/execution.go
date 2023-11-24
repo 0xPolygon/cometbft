@@ -43,9 +43,6 @@ type BlockExecutor struct {
 	logger log.Logger
 
 	metrics *Metrics
-
-	// [peppermint] fast sync
-	fastSyncFunc func() bool
 }
 
 type BlockExecutorOption func(executor *BlockExecutor)

@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	cmtrand "github.com/cometbft/cometbft/libs/rand"
-	. "github.com/cometbft/cometbft/libs/test"
+	. "github.com/cometbft/cometbft/libs/test" //nolint:revive
 
 	"github.com/cometbft/cometbft/crypto/tmhash"
 )

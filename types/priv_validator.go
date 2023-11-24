@@ -152,7 +152,7 @@ func (pv *ErroringMockPV) SignProposal(string, *cmtproto.Proposal) error {
 }
 
 // Implements PrivValidator.
-func (pv *ErroringMockPV) SignBytes(data []byte) ([]byte, error) {
+func (pv *ErroringMockPV) SignBytes(_ []byte) ([]byte, error) {
 	return nil, ErroringMockPVErr
 }
 
