@@ -51,11 +51,7 @@ func TestValidTxProof(t *testing.T) {
 	cases := []struct {
 		txs Txs
 	}{
-		// TODO(@raneet10): This case fails in peppermint because Txs.Hash() is calculated
-		// as hash of the first tx and not merkle root of the tx.
-		// Uncomment if we go on to treat empty or single tx list indifferently
-		// from regular tx list.
-		// {Txs{{1, 4, 34, 87, 163, 1}}},
+		{Txs{{1, 4, 34, 87, 163, 1}}},
 		{Txs{{5, 56, 165, 2}, {4, 77}}},
 		{Txs{Tx("foo"), Tx("bar"), Tx("baz")}},
 		{makeTxs(20, 5)},

@@ -245,35 +245,3 @@ func (cli *grpcClient) VerifyVoteExtension(ctx context.Context, req *types.Reque
 func (cli *grpcClient) FinalizeBlock(ctx context.Context, req *types.RequestFinalizeBlock) (*types.ResponseFinalizeBlock, error) {
 	return cli.client.FinalizeBlock(ctx, types.ToRequestFinalizeBlock(req).GetFinalizeBlock(), grpc.WaitForReady(true))
 }
-
-//
-// Side channel
-//
-
-// func (cli *grpcClient) DeliverSideTxAsync(params types.RequestDeliverSideTx) *ReqRes {
-// 	req := types.ToRequestDeliverSideTx(params)
-// 	res, err := cli.client.DeliverSideTx(context.Background(), req.GetDeliverSideTx(), grpc.WaitForReady(true))
-// 	if err != nil {
-// 		cli.StopForError(err)
-// 	}
-// 	return cli.finishAsyncCall(req, &types.Response{Value: &types.Response_DeliverSideTx{DeliverSideTx: res}})
-// }
-
-// func (cli *grpcClient) BeginSideBlockAsync(params types.RequestBeginSideBlock) *ReqRes {
-// 	req := types.ToRequestBeginSideBlock(params)
-// 	res, err := cli.client.BeginSideBlock(context.Background(), req.GetBeginSideBlock(), grpc.WaitForReady(true))
-// 	if err != nil {
-// 		cli.StopForError(err)
-// 	}
-// 	return cli.finishAsyncCall(req, &types.Response{Value: &types.Response_BeginSideBlock{BeginSideBlock: res}})
-// }
-
-// func (cli *grpcClient) BeginSideBlockSync(params types.RequestBeginSideBlock) (*types.ResponseBeginSideBlock, error) {
-// 	reqres := cli.BeginSideBlockAsync(params)
-// 	return reqres.Response.GetBeginSideBlock(), cli.Error()
-// }
-
-// func (cli *grpcClient) DeliverSideTxSync(params types.RequestDeliverSideTx) (*types.ResponseDeliverSideTx, error) {
-// 	reqres := cli.DeliverSideTxAsync(params)
-// 	return reqres.Response.GetDeliverSideTx(), cli.Error()
-// }

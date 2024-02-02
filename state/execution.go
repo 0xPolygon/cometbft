@@ -288,9 +288,6 @@ func (blockExec *BlockExecutor) ApplyBlock(
 
 	fail.Fail() // XXX
 
-	// Save side tx responses
-	// state.SideTxResponses = sideTxResponses
-
 	// Update the app hash and save the state.
 	state.AppHash = abciResponse.AppHash
 	if err := blockExec.store.Save(state); err != nil {
@@ -447,8 +444,6 @@ func buildLastCommitInfo(block *types.Block, store Store, initialHeight int64) a
 			commitSize, valSetLen, block.Height, block.LastCommit.Signatures, lastValSet.Validators,
 		))
 	}
-
-	// abciResponses.BeginBlock.Events = append(abciResponses.BeginBlock.Events, sideBlockResponse.Events...)
 
 	//
 	// Deliver tx

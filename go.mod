@@ -50,11 +50,8 @@ require (
 	github.com/ethereum/go-ethereum v1.13.4
 	github.com/go-git/go-git/v5 v5.6.1
 	github.com/gofrs/uuid v4.4.0+incompatible
-	github.com/gogo/protobuf v1.3.2
 	github.com/google/uuid v1.3.1
 	github.com/oasisprotocol/curve25519-voi v0.0.0-20220708102147-0a8a51822cae
-	github.com/tendermint/go-amino v0.16.0
-	github.com/tendermint/tendermint v0.32.7
 	github.com/vektra/mockery/v2 v2.23.1
 	golang.org/x/sync v0.5.0
 	gonum.org/v1/gonum v0.12.0
@@ -141,6 +138,7 @@ require (
 	github.com/gobwas/glob v0.2.3 // indirect
 	github.com/gofrs/flock v0.8.1 // indirect
 	github.com/gofrs/uuid/v5 v5.0.0 // indirect
+	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/glog v1.1.2 // indirect
 	github.com/golang/snappy v0.0.5-0.20220116011046-fa5810519dcb // indirect
 	github.com/golangci/check v0.0.0-20180506172741-cfe4005ccda2 // indirect
@@ -300,7 +298,3 @@ require (
 )
 
 replace github.com/ethereum/go-ethereum => github.com/maticnetwork/bor v1.0.4
-
-replace github.com/tendermint/tm-db => github.com/tendermint/tm-db v0.2.0
-
-replace github.com/tendermint/tendermint => github.com/maticnetwork/tendermint v0.33.0

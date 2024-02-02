@@ -224,9 +224,6 @@ func TestNilHeaderHashDoesntCrash(t *testing.T) {
 }
 
 func TestNilDataHashDoesntCrash(t *testing.T) {
-	// FIXME: If we decide to go with the peppermint's txs.Hash(), then this test
-	// would need to be modified accordingly
-	t.Skip()
 	assert.Equal(t, emptyBytes, []byte((*Data)(nil).Hash()))
 	assert.Equal(t, emptyBytes, []byte(new(Data).Hash()))
 }

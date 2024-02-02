@@ -44,17 +44,9 @@ type Txs []Tx
 
 // Hash returns the Merkle root hash of the transaction hashes.
 // i.e. the leaves of the tree are the hashes of the txs.
-// TODO(@raneet10): Investigate and decide whether we should handle empty or single tx specially
 func (txs Txs) Hash() []byte {
-	switch len(txs) {
-	case 0:
-		return nil
-	case 1:
-		return txs[0].Hash()
-	default:
-		hl := txs.hashList()
-		return merkle.HashFromByteSlices(hl)
-	}
+	hl := txs.hashList()
+	return merkle.HashFromByteSlices(hl)
 }
 
 // Index returns the index of this transaction in the list, or -1 if not found

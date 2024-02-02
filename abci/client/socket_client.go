@@ -412,32 +412,6 @@ func (cli *socketClient) FinalizeBlock(ctx context.Context, req *types.RequestFi
 	return reqRes.Response.GetFinalizeBlock(), cli.Error()
 }
 
-//
-// Side channel
-//
-
-// func (cli *socketClient) BeginSideBlockAsync(req types.RequestBeginSideBlock) *ReqRes {
-// 	return cli.queueRequest(types.ToRequestBeginSideBlock(req))
-// }
-
-// func (cli *socketClient) InitChainSync(req types.RequestInitChain) (*types.ResponseInitChain, error) {
-// 	reqres := cli.queueRequest(types.ToRequestInitChain(req))
-// 	cli.FlushSync()
-// 	return reqres.Response.GetInitChain(), cli.Error()
-// }
-
-// func (cli *socketClient) BeginBlockSync(req types.RequestBeginBlock) (*types.ResponseBeginBlock, error) {
-// 	reqres := cli.queueRequest(types.ToRequestBeginBlock(req))
-// 	cli.FlushSync()
-// 	return reqres.Response.GetBeginBlock(), cli.Error()
-// }
-
-// func (cli *socketClient) EndBlockSync(req types.RequestEndBlock) (*types.ResponseEndBlock, error) {
-// 	reqres := cli.queueRequest(types.ToRequestEndBlock(req))
-// 	cli.FlushSync()
-// 	return reqres.Response.GetEndBlock(), cli.Error()
-// }
-
 func (cli *socketClient) queueRequest(ctx context.Context, req *types.Request) (*ReqRes, error) {
 	reqres := NewReqRes(req)
 

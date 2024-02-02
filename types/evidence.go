@@ -15,7 +15,7 @@ import (
 	cmtjson "github.com/cometbft/cometbft/libs/json"
 	cmtrand "github.com/cometbft/cometbft/libs/rand"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
-	amino "github.com/tendermint/go-amino" //nolint:depguard
+	//nolint:depguard
 )
 
 // Evidence represents any provable malicious activity by a validator.
@@ -28,12 +28,6 @@ type Evidence interface {
 	String() string           // string format of the evidence
 	Time() time.Time          // time of the infraction
 	ValidateBasic() error     // basic consistency check
-}
-
-// From peppermint, will be removed eventually
-func RegisterEvidences(cdc *amino.Codec) {
-	cdc.RegisterInterface((*Evidence)(nil), nil)
-	cdc.RegisterConcrete(&DuplicateVoteEvidence{}, "tendermint/DuplicateVoteEvidence", nil)
 }
 
 //--------------------------------------------------------------------------------------

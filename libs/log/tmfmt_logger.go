@@ -98,13 +98,13 @@ func (l tmfmtLogger) Log(keyvals ...interface{}) error {
 	// Form a custom CometBFT line
 	//
 	// Example:
-	//     DEBUG[2016-05-02|11:06:44.322]   Stopping AddrBook (ignoring: already stopped)
+	//     D[2016-05-02|11:06:44.322]   Stopping AddrBook (ignoring: already stopped)
 	//
 	// Description:
-	//     DEBUG						- log level, uppercase
+	//     D										- first character of the level, uppercase (ASCII only)
 	//     [2016-05-02|11:06:44.322]    - our time format (see https://golang.org/src/time/format.go)
 	//     Stopping ...					- message
-	enc.buf.WriteString(fmt.Sprintf("%-5s[%s] %-44s ", strings.ToUpper(lvl), time.Now().Format("2006-01-02|15:04:05.000"), msg))
+	enc.buf.WriteString(fmt.Sprintf("%c[%s] %-44s ", lvl[0]-32, time.Now().Format("2006-01-02|15:04:05.000"), msg))
 
 	if module != unknown {
 		enc.buf.WriteString("module=" + module + " ")

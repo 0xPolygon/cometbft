@@ -45,7 +45,7 @@ func Test_genPrivKey(t *testing.T) {
 
 // Ensure that signature verification works, and that
 // non-canonical signatures fail.
-// // Note: run with CGO_ENABLED=0 or go test -tags !cgo.
+// Note: run with CGO_ENABLED=0 or go test -tags !cgo.
 func TestSignatureVerificationAndRejectUpperS(t *testing.T) {
 	msg := []byte("We have lingered long enough on the shores of the cosmic ocean.")
 	for i := 0; i < 500; i++ {

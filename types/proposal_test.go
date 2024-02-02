@@ -141,7 +141,7 @@ func TestProposalValidateBasic(t *testing.T) {
 		{"Invalid Signature", func(p *Proposal) {
 			p.Signature = make([]byte, 0)
 		}, true},
-		// TODO(raneet10): This check is skipped currently.
+		// TODO HV2: This check is skipped currently.
 		// Uncomment if the max sig size check is brought back
 		// {"Too big Signature", func(p *Proposal) {
 		// 	p.Signature = make([]byte, MaxSignatureSize+1)

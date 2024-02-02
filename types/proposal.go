@@ -30,7 +30,6 @@ type Proposal struct {
 	BlockID   BlockID   `json:"block_id"`
 	Timestamp time.Time `json:"timestamp"`
 	Signature []byte    `json:"signature"`
-	Data      []byte    `json:"data"` // [peppermint] tx data
 }
 
 // NewProposal returns a new Proposal.
@@ -73,7 +72,7 @@ func (p *Proposal) ValidateBasic() error {
 	if len(p.Signature) == 0 {
 		return errors.New("signature is missing")
 	}
-	// TODO(raneet10): ensure skipping signature check is innocuous.
+	// TODO HV2: ensure skipping signature check is innocuous.
 	// Also need to know how upstream would handle these checks for different keys (should be trivial but better to confirm).
 	// if len(p.Signature) > MaxSignatureSize {
 	// 	return fmt.Errorf("Signature is too big (max: %d)", MaxSignatureSize)

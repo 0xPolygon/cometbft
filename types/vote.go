@@ -53,32 +53,16 @@ type Address = crypto.Address
 // Vote represents a prevote, precommit, or commit vote from validators for
 // consensus.
 type Vote struct {
-	Type             cmtproto.SignedMsgType `json:"type"`
-	Height           int64                  `json:"height"`
-	Round            int32                  `json:"round"`    // assume there will not be greater than 2_147_483_647 rounds
-	BlockID          BlockID                `json:"block_id"` // zero if vote is nil.
-	Timestamp        time.Time              `json:"timestamp"`
-	ValidatorAddress Address                `json:"validator_address"`
-	ValidatorIndex   int32                  `json:"validator_index"`
-	Signature        []byte                 `json:"signature"`
-
-	SideTxResults      []SideTxResult `json:"side_tx_results"` // side-tx result [peppermint]
-	Extension          []byte         `json:"extension"`
-	ExtensionSignature []byte         `json:"extension_signature"`
-}
-
-// From peppermint, will be removed eventually
-type LegacyVote struct {
-	Type             SignedMsgType `json:"type"`
-	Height           int64         `json:"height"`
-	Round            int           `json:"round"`
-	BlockID          BlockID       `json:"block_id"` // zero if vote is nil.
-	Timestamp        time.Time     `json:"timestamp"`
-	ValidatorAddress Address       `json:"validator_address"`
-	ValidatorIndex   int           `json:"validator_index"`
-	Signature        []byte        `json:"signature"`
-
-	SideTxResults []SideTxResult `json:"side_tx_results"` // side-tx result [peppermint]
+	Type               cmtproto.SignedMsgType `json:"type"`
+	Height             int64                  `json:"height"`
+	Round              int32                  `json:"round"`    // assume there will not be greater than 2_147_483_647 rounds
+	BlockID            BlockID                `json:"block_id"` // zero if vote is nil.
+	Timestamp          time.Time              `json:"timestamp"`
+	ValidatorAddress   Address                `json:"validator_address"`
+	ValidatorIndex     int32                  `json:"validator_index"`
+	Signature          []byte                 `json:"signature"`
+	Extension          []byte                 `json:"extension"`
+	ExtensionSignature []byte                 `json:"extension_signature"`
 }
 
 // VoteFromProto attempts to convert the given serialization (Protobuf) type to
@@ -91,7 +75,6 @@ func VoteFromProto(pv *cmtproto.Vote) (*Vote, error) {
 		return nil, err
 	}
 
-	// TODO(@raneet10): Probably need to add SideTxResult
 	return &Vote{
 		Type:               pv.Type,
 		Height:             pv.Height,
@@ -178,16 +161,6 @@ func VoteExtensionSignBytes(chainID string, vote *cmtproto.Vote) []byte {
 	return bz
 }
 
-// From peppermint
-func (vote *LegacyVote) SignBytes(chainID string) []byte {
-	bz, err := cdc.MarshalBinaryLengthPrefixed(LegacyCanonicalizeVote(chainID, vote))
-	if err != nil {
-		panic(err)
-	}
-
-	return bz
-}
-
 func (vote *Vote) Copy() *Vote {
 	voteCopy := *vote
 	return &voteCopy
@@ -231,7 +204,6 @@ func (vote *Vote) String() string {
 		cmtbytes.Fingerprint(vote.Signature),
 		cmtbytes.Fingerprint(vote.Extension),
 		CanonicalTime(vote.Timestamp),
-		// sideTxResults,
 	)
 }
 
@@ -332,7 +304,7 @@ func (vote *Vote) ValidateBasic() error {
 		return errors.New("signature is missing")
 	}
 
-	// TODO(@raneet10): ensure skipping signature check is innocuous.
+	// TODO HV2: ensure skipping signature check is innocuous.
 	// Also need to know how upstream would handle these checks for different keys (should be trivial but better to confirm).
 	// if len(vote.Signature) > MaxSignatureSize {
 	// 	return fmt.Errorf("Signature is too big (max: %d)", MaxSignatureSize)

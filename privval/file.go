@@ -275,16 +275,6 @@ func (pv *FilePV) SignProposal(chainID string, proposal *cmtproto.Proposal) erro
 	return nil
 }
 
-// SignSideTxResult signs given data bytes
-func (pv *FilePV) SignSideTxResult(sideTxResult *types.SideTxResultWithData) error {
-	sig, err := pv.Key.PrivKey.Sign(sideTxResult.GetBytes())
-	if err != nil {
-		return err
-	}
-	sideTxResult.Sig = sig
-	return nil
-}
-
 // Save persists the FilePV to disk.
 func (pv *FilePV) Save() {
 	pv.Key.Save()

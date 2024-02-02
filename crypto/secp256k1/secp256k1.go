@@ -73,10 +73,6 @@ func (privKey PrivKey) PubKey() crypto.PubKey {
 	pk := ethCrypto.FromECDSAPub(&privateObject.PublicKey)
 	return PubKey(pk)
 
-	// _, pubkeyObject := secp256k1.PrivKeyFromBytes(privKey)
-
-	// pk := pubkeyObject.SerializeCompressed()
-	// return PubKey(pk)
 }
 
 // Equals - you probably don't need to use this.
@@ -154,19 +150,13 @@ func GenPrivKeySecp256k1(secret []byte) PrivKey {
 }
 
 // Sign creates an ECDSA signature on curve Secp256k1, using SHA256 on the msg.
-// The returned signature will be of the form R || S (in lower-S form).
+// The returned signature will be of the form R || S || V (in lower-S form).
 func (privKey PrivKey) Sign(msg []byte) ([]byte, error) {
-	// [peppermint] sign with ethcrypto
-	// priv, _ := secp256k1.PrivKeyFromBytes(privKey)
-
-	// sig, err := ecdsa.SignCompact(priv, crypto.Sha256(msg), false)
 	privateObject, err := ethCrypto.ToECDSA(privKey)
 	if err != nil {
 		return nil, err
 	}
 
-	// // remove the first byte which is compactSigRecoveryCode
-	// return sig[1:], nil
 	return ethCrypto.Sign(ethCrypto.Keccak256(msg), privateObject)
 }
 
@@ -175,16 +165,16 @@ func (privKey PrivKey) Sign(msg []byte) ([]byte, error) {
 var _ crypto.PubKey = PubKey{}
 var _ crypto.PubKey = PubKeyOld{}
 
-// PubKeySize is comprised of 32 bytes for one field element
-// (the x-coordinate), plus one byte for the parity of the y-coordinate.
-// const PubKeySize = 33
+// PubKeySize (uncompressed) is comprised of 65 bytes for two field elements (x and y)
+// and a prefix byte (0x04) to indicate that it is uncompressed.
 const PubKeySize = 65
 
+// SigSize is the size of the ECDSA signature.
+const SigSize = 65
+
 // PubKey implements crypto.PubKey.
-// It is the compressed form of the pubkey. The first byte depends is a 0x02 byte
-// if the y-coordinate is the lexicographically largest of the two associated with
-// the x-coordinate. Otherwise the first byte is a 0x03.
-// This prefix is followed with the x-coordinate.
+// It is the uncompressed form of the pubkey. The first byte is prefixed with 0x04.
+// This prefix is followed with the (x,y)-coordinates.
 type PubKey []byte
 type PubKeyOld []byte
 
@@ -212,19 +202,11 @@ func (pubKey PubKeyOld) VerifySignature(msg []byte, sigStr []byte) bool {
 	return PubKey(pubKey).VerifySignature(msg, sigStr)
 }
 
-// Address returns a Bitcoin style addresses: RIPEMD160(SHA256(pubkey))
+// Address returns a Ethereym style addresses: Last_20_Bytes(KECCAK256(pubkey))
 func (pubKey PubKey) Address() crypto.Address {
 	if len(pubKey) != PubKeySize {
 		panic(fmt.Sprintf("length of pubkey is incorrect %d != %d", len(pubKey), PubKeySize))
 	}
-	// hasherSHA256 := sha256.New()
-	// _, _ = hasherSHA256.Write(pubKey) // does not error
-	// sha := hasherSHA256.Sum(nil)
-
-	// hasherRIPEMD160 := ripemd160.New()
-	// _, _ = hasherRIPEMD160.Write(sha) // does not error
-
-	// return crypto.Address(hasherRIPEMD160.Sum(nil))
 	return crypto.Address(ethCrypto.Keccak256(pubKey[1:])[12:])
 }
 
@@ -248,38 +230,13 @@ func (pubKey PubKey) Type() string {
 	return KeyType
 }
 
-// VerifySignature verifies a signature of the form R || S.
+// VerifySignature verifies a signature of the form R || S || V.
 // It rejects signatures which are not in lower-S form.
 func (pubKey PubKey) VerifySignature(msg []byte, sigStr []byte) bool {
-	// if len(sigStr) != 64 {
-	// 	return false
-	// }
-
-	// pub, err := secp256k1.ParsePubKey(pubKey)
-	// if err != nil {
-	// 	return false
-	// }
-
-	// // parse the signature:
-	// signature := signatureFromBytes(sigStr)
-	// // Reject malleable signatures. libsecp256k1 does this check but btcec doesn't.
-	// // see: https://github.com/ethereum/go-ethereum/blob/f9401ae011ddf7f8d2d95020b7446c17f8d98dc1/crypto/signature_nocgo.go#L90-L93
-	// // Serialize() would negate S value if it is over half order.
-	// // Hence, if the signature is different after Serialize() if should be rejected.
-	// var modifiedSignature, parseErr = ecdsa.ParseDERSignature(signature.Serialize())
-	// if parseErr != nil {
-	// 	return false
-	// }
-	// if !signature.IsEqual(modifiedSignature) {
-	// 	return false
-	// }
-
-	if len(sigStr) != 65 {
+	if len(sigStr) != SigSize {
 		return false
 	}
 
 	hash := ethCrypto.Keccak256(msg)
 	return ethCrypto.VerifySignature(pubKey, hash, sigStr[:64])
-
-	// return signature.Verify(crypto.Sha256(msg), pub)
 }
