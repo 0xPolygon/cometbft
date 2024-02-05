@@ -302,7 +302,7 @@ func TestCompiledMatches(t *testing.T) {
 		{`peaches.kg < 4`,
 			newTestEvents(`peaches|kg=5`),
 			false},
-		//nolint:goconst
+
 		{`tx.date > DATE 2017-01-01`,
 			newTestEvents(`tx|date=` + time.Now().Format(syntax.DateFormat)),
 			true},

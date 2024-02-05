@@ -25,7 +25,6 @@ func TestGenesisBad(t *testing.T) {
 			`{"validators":[{"pub_key":{"value":"AT/+aaL1eB0477Mud9JMm8Sh8BIvOYlPGC9KkIUmFaE="},"power":"10","name":""}]}`,
 		),
 		// missing chain_id
-		//nolint:goconst
 		[]byte(
 			`{"validators":[` +
 				`{"pub_key":{` +

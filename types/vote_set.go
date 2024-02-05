@@ -263,7 +263,6 @@ func (voteSet *VoteSet) addVerifiedVote(
 
 	// Already exists in voteSet.votes?
 	if existing := voteSet.votes[valIndex]; existing != nil {
-		//nolint:revive
 		if existing.BlockID.Equals(vote.BlockID) {
 			panic("addVerifiedVote does not expect duplicate votes")
 		}

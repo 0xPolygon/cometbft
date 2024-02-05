@@ -765,7 +765,7 @@ func TestBigInt(t *testing.T) {
 		{fmt.Sprintf("tx.hash = '%x'", hash), txResult, 1},
 		{fmt.Sprintf("tx.hash = '%x'", hash2), txResult2, 1},
 		// search by exact match (one key) - bigint
-		{"account.number >= " + bigInt, nil, 2}, //nolint:goconst
+		{"account.number >= " + bigInt, nil, 2},
 		// search by exact match (one key) - bigint range
 		{"account.number >= " + bigInt + " AND tx.height > 0", nil, 2},
 		{"account.number >= " + bigInt + " AND tx.height > 0 AND account.owner = '/Ivan/'", nil, 0},
@@ -774,7 +774,7 @@ func TestBigInt(t *testing.T) {
 		{"account.number >= " + bigInt + " AND tx.height > 0 AND account.amount = 5", txResult2, 1},
 		{"account.number >= " + bigInt + " AND account.amount <= 5", txResult2, 1},
 		{"account.number > " + bigFloatSmaller + " AND account.amount = 3", txResult2, 1},
-		{"account.number < " + bigInt + " AND tx.height >= 1", nil, 2}, //nolint:goconst
+		{"account.number < " + bigInt + " AND tx.height >= 1", nil, 2},
 		{"account.number < " + bigInt + " AND tx.height = 1", nil, 1},
 		{"account.number < " + bigInt + " AND tx.height = 2", nil, 1},
 	}

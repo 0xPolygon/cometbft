@@ -42,7 +42,6 @@ func IDAddressString(id ID, protocolHostPort string) string {
 // TODO: socks proxies?
 func NewNetAddress(id ID, addr net.Addr) *NetAddress {
 	tcpAddr, ok := addr.(*net.TCPAddr)
-	//nolint:revive
 	if !ok {
 		if flag.Lookup("test.v") == nil { // normal run
 			panic(fmt.Sprintf("Only TCPAddrs are supported. Got: %v", addr))

@@ -67,7 +67,7 @@ func TestWriteFileAtomicDuplicateFile(t *testing.T) {
 	atomicWriteFileRand = defaultSeed
 	firstFileRand := randWriteFileSuffix()
 	atomicWriteFileRand = defaultSeed
-	fname := "/tmp/" + atomicWriteFilePrefix + firstFileRand //nolint:goconst
+	fname := "/tmp/" + atomicWriteFilePrefix + firstFileRand
 	f, err := os.OpenFile(fname, atomicWriteFileFlag, 0777)
 	defer os.Remove(fname)
 	// Defer here, in case there is a panic in WriteFileAtomic.

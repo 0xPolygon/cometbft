@@ -111,7 +111,6 @@ func TestParseMetricsStruct(t *testing.T) {
 		},
 		{
 			name: "histogram",
-			//nolint:goconst
 			metricsStruct: "type Metrics struct {\n" +
 				"myHistogram metrics.Histogram `metrics_buckettype:\"exp\" metrics_bucketsizes:\"1, 100, .8\"`\n" +
 				"}",
