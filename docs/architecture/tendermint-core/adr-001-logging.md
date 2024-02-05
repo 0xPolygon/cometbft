@@ -39,7 +39,6 @@ have some in `tmlibs/common`.
 
 - `Debug` - extended output for devs
 - `Info` - all that is useful for a user
-- `Warn` - misconfiguration/ potential errors
 - `Error` - errors
 
 `Notice` should become `Info`, `Warn` either `Error` or `Debug` depending on the message, `Crit` -> `Error`.
