@@ -131,6 +131,7 @@ func (app *Application) CheckTx(_ context.Context, req *types.RequestCheckTx) (*
 	// If it is a validator update transaction, check that it is correctly formatted
 	if isValidatorTx(req.Tx) {
 		if _, _, _, err := parseValidatorTx(req.Tx); err != nil {
+			//nolint:nilerr
 			return &types.ResponseCheckTx{Code: CodeTypeInvalidTxFormat}, nil
 		}
 	} else if !isValidTx(req.Tx) {
@@ -156,10 +157,10 @@ func isValidTx(tx []byte) bool {
 	return false
 }
 
-// PrepareProposal is called when the node is a proposer. Tendermint stages a set of transactions to the application. As the
+// PrepareProposal is called when the node is a proposer. CometBFT stages a set of transactions to the application. As the
 // KVStore has two accepted formats, `:` and `=`, we modify all instances of `:` with `=` to make it consistent. Note: this is
 // quite a trivial example of transaction modification.
-// NOTE: we assume that Tendermint will never provide more transactions than can fit in a block.
+// NOTE: we assume that CometBFT will never provide more transactions than can fit in a block.
 func (app *Application) PrepareProposal(ctx context.Context, req *types.RequestPrepareProposal) (*types.ResponsePrepareProposal, error) {
 	return &types.ResponsePrepareProposal{Txs: app.formatTxs(ctx, req.Txs)}, nil
 }
@@ -421,7 +422,7 @@ func parseValidatorTx(tx []byte) (string, []byte, int64, error) {
 	if len(typeKeyAndPower) != 3 {
 		return "", nil, 0, fmt.Errorf("expected 'pubkeytype!pubkey!power'. Got %v", typeKeyAndPower)
 	}
-	keyType, pubkeyS, powerS := typeKeyAndPower[0], typeKeyAndPower[1], typeKeyAndPower[2]
+	keytype, pubkeyS, powerS := typeKeyAndPower[0], typeKeyAndPower[1], typeKeyAndPower[2]
 
 	// decode the pubkey
 	pubkey, err := base64.StdEncoding.DecodeString(pubkeyS)
@@ -439,7 +440,7 @@ func parseValidatorTx(tx []byte) (string, []byte, int64, error) {
 		return "", nil, 0, fmt.Errorf("power can not be less than 0, got %d", power)
 	}
 
-	return keyType, pubkey, power, nil
+	return keytype, pubkey, power, nil
 }
 
 // add, update, or remove a validator
