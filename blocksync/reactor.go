@@ -3,7 +3,6 @@ package blocksync
 import (
 	"fmt"
 	"reflect"
-	"sync"
 	"time"
 
 	"github.com/cometbft/cometbft/libs/log"
@@ -52,11 +51,10 @@ type Reactor struct {
 	// immutable
 	initialState sm.State
 
-	blockExec     *sm.BlockExecutor
-	store         sm.BlockStore
-	pool          *BlockPool
-	blockSync     bool
-	poolRoutineWg sync.WaitGroup
+	blockExec *sm.BlockExecutor
+	store     sm.BlockStore
+	pool      *BlockPool
+	blockSync bool
 
 	requestsCh <-chan BlockRequest
 	errorsCh   <-chan peerError
@@ -123,11 +121,7 @@ func (bcR *Reactor) OnStart() error {
 		if err != nil {
 			return err
 		}
-		bcR.poolRoutineWg.Add(1)
-		go func() {
-			defer bcR.poolRoutineWg.Done()
-			bcR.poolRoutine(false)
-		}()
+		go bcR.poolRoutine(false)
 	}
 	return nil
 }
@@ -142,11 +136,7 @@ func (bcR *Reactor) SwitchToBlockSync(state sm.State) error {
 	if err != nil {
 		return err
 	}
-	bcR.poolRoutineWg.Add(1)
-	go func() {
-		defer bcR.poolRoutineWg.Done()
-		bcR.poolRoutine(true)
-	}()
+	go bcR.poolRoutine(true)
 	return nil
 }
 
@@ -156,7 +146,6 @@ func (bcR *Reactor) OnStop() {
 		if err := bcR.pool.Stop(); err != nil {
 			bcR.Logger.Error("Error stopping pool", "err", err)
 		}
-		bcR.poolRoutineWg.Wait()
 	}
 }
 
@@ -448,13 +437,6 @@ FOR_LOOP:
 				panic(fmt.Errorf("peeked first block without extended commit at height %d - possible node store corruption", first.Height))
 			}
 
-			// Before priming didProcessCh for another check on the next
-			// iteration, break the loop if the BlockPool or the Reactor itself
-			// has quit. This avoids case ambiguity of the outer select when two
-			// channels are ready.
-			if !bcR.IsRunning() || !bcR.pool.IsRunning() {
-				break FOR_LOOP
-			}
 			// Try again quickly next loop.
 			didProcessCh <- struct{}{}
 
@@ -541,8 +523,6 @@ FOR_LOOP:
 			continue FOR_LOOP
 
 		case <-bcR.Quit():
-			break FOR_LOOP
-		case <-bcR.pool.Quit():
 			break FOR_LOOP
 		}
 	}

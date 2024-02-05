@@ -1,6 +1,3 @@
----
-order: 6
----
 # WAL
 
 Consensus module writes every message to the WAL (write-ahead log).

@@ -23,11 +23,12 @@ import (
 // mempool uses a concurrent list structure for storing transactions that can
 // be efficiently accessed by multiple concurrent readers.
 type CListMempool struct {
-	height   atomic.Int64 // the last block Update()'d to
-	txsBytes atomic.Int64 // total size of mempool, in bytes
+	// Atomic integers
+	height   int64 // the last block Update()'d to
+	txsBytes int64 // total size of mempool, in bytes
 
 	// notify listeners (ie. consensus) when txs are available
-	notifiedTxsAvailable atomic.Bool
+	notifiedTxsAvailable bool
 	txsAvailable         chan struct{} // fires once for each height, when the mempool is not empty
 
 	config *config.MempoolConfig
@@ -76,12 +77,12 @@ func NewCListMempool(
 		config:        cfg,
 		proxyAppConn:  proxyAppConn,
 		txs:           clist.New(),
+		height:        height,
 		recheckCursor: nil,
 		recheckEnd:    nil,
 		logger:        log.NewNopLogger(),
 		metrics:       NopMetrics(),
 	}
-	mp.height.Store(height)
 
 	if cfg.CacheSize > 0 {
 		mp.cache = NewLRUTxCache(cfg.CacheSize)
@@ -170,7 +171,7 @@ func (mem *CListMempool) Size() int {
 
 // Safe for concurrent use by multiple goroutines.
 func (mem *CListMempool) SizeBytes() int64 {
-	return mem.txsBytes.Load()
+	return atomic.LoadInt64(&mem.txsBytes)
 }
 
 // Lock() must be help by the caller during execution.
@@ -183,7 +184,7 @@ func (mem *CListMempool) Flush() {
 	mem.updateMtx.RLock()
 	defer mem.updateMtx.RUnlock()
 
-	mem.txsBytes.Store(0)
+	_ = atomic.SwapInt64(&mem.txsBytes, 0)
 	mem.cache.Reset()
 
 	mem.removeAllTxs()
@@ -318,7 +319,6 @@ func (mem *CListMempool) reqResCb(
 
 		// update metrics
 		mem.metrics.Size.Set(float64(mem.Size()))
-		mem.metrics.SizeBytes.Set(float64(mem.SizeBytes()))
 
 		// passed in by the caller of CheckTx, eg. the RPC
 		if externalCb != nil {
@@ -332,7 +332,7 @@ func (mem *CListMempool) reqResCb(
 func (mem *CListMempool) addTx(memTx *mempoolTx) {
 	e := mem.txs.PushBack(memTx)
 	mem.txsMap.Store(memTx.tx.Key(), e)
-	mem.txsBytes.Add(int64(len(memTx.tx)))
+	atomic.AddInt64(&mem.txsBytes, int64(len(memTx.tx)))
 	mem.metrics.TxSizeBytes.Observe(float64(len(memTx.tx)))
 }
 
@@ -346,7 +346,7 @@ func (mem *CListMempool) RemoveTxByKey(txKey types.TxKey) error {
 		elem.DetachPrev()
 		mem.txsMap.Delete(txKey)
 		tx := elem.Value.(*mempoolTx).tx
-		mem.txsBytes.Add(int64(-len(tx)))
+		atomic.AddInt64(&mem.txsBytes, int64(-len(tx)))
 		return nil
 	}
 	return errors.New("transaction not found in mempool")
@@ -403,14 +403,14 @@ func (mem *CListMempool) resCbFirstTime(
 					"transaction already there, not adding it again",
 					"tx", types.Tx(tx).Hash(),
 					"res", r,
-					"height", mem.height.Load(),
+					"height", mem.height,
 					"total", mem.Size(),
 				)
 				return
 			}
 
 			memTx := &mempoolTx{
-				height:    mem.height.Load(),
+				height:    mem.height,
 				gasWanted: r.CheckTx.GasWanted,
 				tx:        tx,
 			}
@@ -420,7 +420,7 @@ func (mem *CListMempool) resCbFirstTime(
 				"added good transaction",
 				"tx", types.Tx(tx).Hash(),
 				"res", r,
-				"height", mem.height.Load(),
+				"height", memTx.height,
 				"total", mem.Size(),
 			)
 			mem.notifyTxsAvailable()
@@ -528,8 +528,9 @@ func (mem *CListMempool) notifyTxsAvailable() {
 	if mem.Size() == 0 {
 		panic("notified txs available but mempool is empty!")
 	}
-	if mem.txsAvailable != nil && mem.notifiedTxsAvailable.CompareAndSwap(false, true) {
+	if mem.txsAvailable != nil && !mem.notifiedTxsAvailable {
 		// channel cap is 1, so this will send once
+		mem.notifiedTxsAvailable = true
 		select {
 		case mem.txsAvailable <- struct{}{}:
 		default:
@@ -604,8 +605,8 @@ func (mem *CListMempool) Update(
 	postCheck PostCheckFunc,
 ) error {
 	// Set height
-	mem.height.Store(height)
-	mem.notifiedTxsAvailable.Store(false)
+	mem.height = height
+	mem.notifiedTxsAvailable = false
 
 	if preCheck != nil {
 		mem.preCheck = preCheck
@@ -656,7 +657,6 @@ func (mem *CListMempool) Update(
 
 	// Update metrics
 	mem.metrics.Size.Set(float64(mem.Size()))
-	mem.metrics.SizeBytes.Set(float64(mem.SizeBytes()))
 
 	return nil
 }

@@ -40,15 +40,14 @@ Complete documentation can be found on the
 Please do not depend on `main` as your production branch. Use
 [releases](https://github.com/cometbft/cometbft/releases) instead.
 
-If you intend to run CometBFT in production, we're happy to help. To contact
-us, in order of preference:
+We haven't released v1.0 yet
+since we are making breaking changes to the protocol and the APIs. See below for
+more details about [versioning](#versioning).
 
-- [Create a new discussion on
-  GitHub](https://github.com/cometbft/cometbft/discussions)
-- Reach out to us via [Telegram](https://t.me/CometBFT)
-- [Join the Cosmos Network Discord](https://discord.gg/cosmosnetwork) and
-  discuss in
-  [`#cometbft`](https://discord.com/channels/669268347736686612/1069933855307472906)
+In any case, if you intend to run CometBFT in production, we're happy to help.
+
+To contact us, you can also 
+[join the chat](https://discord.com/channels/669268347736686612/669283915743232011).
 
 More on how releases are conducted can be found [here](./RELEASES.md).
 

@@ -54,39 +54,10 @@ func VerifyCommit(chainID string, vals *ValidatorSet, blockID BlockID,
 
 // VerifyCommitLight verifies +2/3 of the set had signed the given commit.
 //
-// This method is primarily used by the light client and does NOT check all the
+// This method is primarily used by the light client and does not check all the
 // signatures.
-func VerifyCommitLight(
-	chainID string,
-	vals *ValidatorSet,
-	blockID BlockID,
-	height int64,
-	commit *Commit,
-) error {
-	return verifyCommitLightInternal(chainID, vals, blockID, height, commit, false)
-}
-
-// VerifyCommitLightAllSignatures verifies +2/3 of the set had signed the given commit.
-//
-// This method DOES check all the signatures.
-func VerifyCommitLightAllSignatures(
-	chainID string,
-	vals *ValidatorSet,
-	blockID BlockID,
-	height int64,
-	commit *Commit,
-) error {
-	return verifyCommitLightInternal(chainID, vals, blockID, height, commit, true)
-}
-
-func verifyCommitLightInternal(
-	chainID string,
-	vals *ValidatorSet,
-	blockID BlockID,
-	height int64,
-	commit *Commit,
-	countAllSignatures bool,
-) error {
+func VerifyCommitLight(chainID string, vals *ValidatorSet, blockID BlockID,
+	height int64, commit *Commit) error {
 	// run a basic validation of the arguments
 	if err := verifyBasicValsAndCommit(vals, commit, height, blockID); err != nil {
 		return err
@@ -104,12 +75,12 @@ func verifyCommitLightInternal(
 	// attempt to batch verify
 	if shouldBatchVerify(vals, commit) {
 		return verifyCommitBatch(chainID, vals, commit,
-			votingPowerNeeded, ignore, count, countAllSignatures, true)
+			votingPowerNeeded, ignore, count, false, true)
 	}
 
 	// if verification failed or is not supported then fallback to single verification
 	return verifyCommitSingle(chainID, vals, commit, votingPowerNeeded,
-		ignore, count, countAllSignatures, true)
+		ignore, count, false, true)
 }
 
 // VerifyCommitLightTrusting verifies that trustLevel of the validator set signed
@@ -118,40 +89,9 @@ func verifyCommitLightInternal(
 // NOTE the given validators do not necessarily correspond to the validator set
 // for this commit, but there may be some intersection.
 //
-// This method is primarily used by the light client and does NOT check all the
+// This method is primarily used by the light client and does not check all the
 // signatures.
-func VerifyCommitLightTrusting(
-	chainID string,
-	vals *ValidatorSet,
-	commit *Commit,
-	trustLevel cmtmath.Fraction,
-) error {
-	return verifyCommitLightTrustingInternal(chainID, vals, commit, trustLevel, false)
-}
-
-// VerifyCommitLightTrustingAllSignatures verifies that trustLevel of the validator
-// set signed this commit.
-//
-// NOTE the given validators do not necessarily correspond to the validator set
-// for this commit, but there may be some intersection.
-//
-// This method DOES check all the signatures.
-func VerifyCommitLightTrustingAllSignatures(
-	chainID string,
-	vals *ValidatorSet,
-	commit *Commit,
-	trustLevel cmtmath.Fraction,
-) error {
-	return verifyCommitLightTrustingInternal(chainID, vals, commit, trustLevel, true)
-}
-
-func verifyCommitLightTrustingInternal(
-	chainID string,
-	vals *ValidatorSet,
-	commit *Commit,
-	trustLevel cmtmath.Fraction,
-	countAllSignatures bool,
-) error {
+func VerifyCommitLightTrusting(chainID string, vals *ValidatorSet, commit *Commit, trustLevel cmtmath.Fraction) error {
 	// sanity checks
 	if vals == nil {
 		return errors.New("nil validator set")
@@ -181,12 +121,12 @@ func verifyCommitLightTrustingInternal(
 	// up by address rather than index.
 	if shouldBatchVerify(vals, commit) {
 		return verifyCommitBatch(chainID, vals, commit,
-			votingPowerNeeded, ignore, count, countAllSignatures, false)
+			votingPowerNeeded, ignore, count, false, false)
 	}
 
 	// attempt with single verification
 	return verifyCommitSingle(chainID, vals, commit, votingPowerNeeded,
-		ignore, count, countAllSignatures, false)
+		ignore, count, false, false)
 }
 
 // ValidateHash returns an error if the hash is not empty, but its
@@ -344,11 +284,7 @@ func verifyCommitSingle(
 			continue
 		}
 
-		if commitSig.ValidateBasic() != nil {
-			return fmt.Errorf("invalid signatures from %v at index %d", val, idx)
-		}
-
-		// If the vals and commit have a 1-to-1 correspondence we can retrieve
+		// If the vals and commit have a 1-to-1 correspondance we can retrieve
 		// them by index else we need to retrieve them by address
 		if lookUpByIndex {
 			val = vals.Validators[idx]
@@ -368,10 +304,6 @@ func verifyCommitSingle(
 				return fmt.Errorf("double vote from %v (%d and %d)", val, firstIndex, secondIndex)
 			}
 			seenVals[valIdx] = idx
-		}
-
-		if val.PubKey == nil {
-			return fmt.Errorf("validator %v has a nil PubKey at index %d", val, idx)
 		}
 
 		voteSignBytes = commit.VoteSignBytes(chainID, int32(idx))

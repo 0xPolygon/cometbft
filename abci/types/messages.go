@@ -2,7 +2,6 @@ package types
 
 import (
 	"io"
-	"math"
 
 	"github.com/cosmos/gogoproto/proto"
 
@@ -10,7 +9,7 @@ import (
 )
 
 const (
-	maxMsgSize = math.MaxInt32 // 2GB
+	maxMsgSize = 104857600 // 100MB
 )
 
 // WriteMessage writes a varint length-delimited protobuf message.

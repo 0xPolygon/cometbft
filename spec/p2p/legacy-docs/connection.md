@@ -1,7 +1,3 @@
----
-order: 1
----
-
 # P2P Multiplex Connection
 
 ## MConnection

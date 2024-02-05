@@ -137,9 +137,7 @@ func MakeGenesis(testnet *e2e.Testnet) (types.GenesisDoc, error) {
 	genesis.ConsensusParams.Version.App = 1
 	genesis.ConsensusParams.Evidence.MaxAgeNumBlocks = e2e.EvidenceAgeHeight
 	genesis.ConsensusParams.Evidence.MaxAgeDuration = e2e.EvidenceAgeTime
-	if testnet.VoteExtensionsUpdateHeight == -1 {
-		genesis.ConsensusParams.ABCI.VoteExtensionsEnableHeight = testnet.VoteExtensionsEnableHeight
-	}
+	genesis.ConsensusParams.ABCI.VoteExtensionsEnableHeight = testnet.VoteExtensionsEnableHeight
 	for validator, power := range testnet.Validators {
 		genesis.Validators = append(genesis.Validators, types.GenesisValidator{
 			Name:    validator.Name,
@@ -175,8 +173,6 @@ func MakeConfig(node *e2e.Node) (*config.Config, error) {
 	cfg.DBBackend = node.Database
 	cfg.StateSync.DiscoveryTime = 5 * time.Second
 	cfg.BlockSync.Version = node.BlockSyncVersion
-	cfg.Mempool.ExperimentalMaxGossipConnectionsToNonPersistentPeers = int(node.Testnet.ExperimentalMaxGossipConnectionsToNonPersistentPeers)
-	cfg.Mempool.ExperimentalMaxGossipConnectionsToPersistentPeers = int(node.Testnet.ExperimentalMaxGossipConnectionsToPersistentPeers)
 
 	switch node.ABCIProtocol {
 	case e2e.ProtocolUNIX:
@@ -262,22 +258,20 @@ func MakeConfig(node *e2e.Node) (*config.Config, error) {
 // MakeAppConfig generates an ABCI application config for a node.
 func MakeAppConfig(node *e2e.Node) ([]byte, error) {
 	cfg := map[string]interface{}{
-		"chain_id":                      node.Testnet.Name,
-		"dir":                           "data/app",
-		"listen":                        AppAddressUNIX,
-		"mode":                          node.Mode,
-		"protocol":                      "socket",
-		"persist_interval":              node.PersistInterval,
-		"snapshot_interval":             node.SnapshotInterval,
-		"retain_blocks":                 node.RetainBlocks,
-		"key_type":                      node.PrivvalKey.Type(),
-		"prepare_proposal_delay":        node.Testnet.PrepareProposalDelay,
-		"process_proposal_delay":        node.Testnet.ProcessProposalDelay,
-		"check_tx_delay":                node.Testnet.CheckTxDelay,
-		"vote_extension_delay":          node.Testnet.VoteExtensionDelay,
-		"finalize_block_delay":          node.Testnet.FinalizeBlockDelay,
-		"vote_extensions_enable_height": node.Testnet.VoteExtensionsEnableHeight,
-		"vote_extensions_update_height": node.Testnet.VoteExtensionsUpdateHeight,
+		"chain_id":               node.Testnet.Name,
+		"dir":                    "data/app",
+		"listen":                 AppAddressUNIX,
+		"mode":                   node.Mode,
+		"protocol":               "socket",
+		"persist_interval":       node.PersistInterval,
+		"snapshot_interval":      node.SnapshotInterval,
+		"retain_blocks":          node.RetainBlocks,
+		"key_type":               node.PrivvalKey.Type(),
+		"prepare_proposal_delay": node.Testnet.PrepareProposalDelay,
+		"process_proposal_delay": node.Testnet.ProcessProposalDelay,
+		"check_tx_delay":         node.Testnet.CheckTxDelay,
+		"vote_extension_delay":   node.Testnet.VoteExtensionDelay,
+		"finalize_block_delay":   node.Testnet.FinalizeBlockDelay,
 	}
 	switch node.ABCIProtocol {
 	case e2e.ProtocolUNIX:

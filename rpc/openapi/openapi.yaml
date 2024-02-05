@@ -2794,10 +2794,10 @@ components:
       properties:
         key:
           type: string
-          example: "action"
+          example: "YWN0aW9u"
         value:
           type: string
-          example: "send"
+          example: "c2VuZA=="
         index:
           type: boolean
           example: false

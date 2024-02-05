@@ -42,16 +42,7 @@ func ValidateValidatorUpdates(abciUpdates []abci.ValidatorUpdate, params types.V
 // store.go, exported exclusively and explicitly for testing.
 func SaveValidatorsInfo(db dbm.DB, height, lastHeightChanged int64, valSet *types.ValidatorSet) error {
 	stateStore := dbStore{db, StoreOptions{DiscardABCIResponses: false}}
-	batch := stateStore.db.NewBatch()
-	err := stateStore.saveValidatorsInfo(height, lastHeightChanged, valSet, batch)
-	if err != nil {
-		return err
-	}
-	err = batch.WriteSync()
-	if err != nil {
-		return err
-	}
-	return nil
+	return stateStore.saveValidatorsInfo(height, lastHeightChanged, valSet)
 }
 
 func Int64ToBytes(val int64) []byte {
