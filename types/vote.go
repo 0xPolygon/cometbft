@@ -305,7 +305,7 @@ func (vote *Vote) ValidateBasic() error {
 	}
 
 	if len(vote.Signature) > MaxSignatureSize {
-		return fmt.Errorf("Signature is too big (max: %d)", MaxSignatureSize)
+		return fmt.Errorf("signature is too big (max: %d)", MaxSignatureSize)
 	}
 
 	// We should only ever see vote extensions in non-nil precommits, otherwise
