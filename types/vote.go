@@ -327,9 +327,9 @@ func (vote *Vote) ValidateBasic() error {
 		// It's possible that this vote has vote extensions but
 		// they could also be disabled and thus not present thus
 		// we can't do all checks
-		// if len(vote.ExtensionSignature) > MaxSignatureSize {
-		// 	return fmt.Errorf("vote extension signature is too big (max: %d)", MaxSignatureSize)
-		// }
+		if len(vote.ExtensionSignature) > MaxSignatureSize {
+			return fmt.Errorf("vote extension signature is too big (max: %d)", MaxSignatureSize)
+		}
 
 		// NOTE: extended votes should have a signature regardless of
 		// of whether there is any data in the extension or not however
