@@ -304,11 +304,9 @@ func (vote *Vote) ValidateBasic() error {
 		return errors.New("signature is missing")
 	}
 
-	// TODO HV2: ensure skipping signature check is innocuous.
-	// Also need to know how upstream would handle these checks for different keys (should be trivial but better to confirm).
-	// if len(vote.Signature) > MaxSignatureSize {
-	// 	return fmt.Errorf("Signature is too big (max: %d)", MaxSignatureSize)
-	// }
+	if len(vote.Signature) > MaxSignatureSize {
+		return fmt.Errorf("Signature is too big (max: %d)", MaxSignatureSize)
+	}
 
 	// We should only ever see vote extensions in non-nil precommits, otherwise
 	// this is a violation of the specification.

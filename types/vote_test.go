@@ -364,8 +364,7 @@ func TestInvalidVotes(t *testing.T) {
 		{"invalid address", func(v *Vote) { v.ValidatorAddress = make([]byte, 1) }},
 		{"invalid validator index", func(v *Vote) { v.ValidatorIndex = -1 }},
 		{"invalid signature", func(v *Vote) { v.Signature = nil }},
-		// TODO HV2: Maxsize check for sig is skipped for now. Uncomment when it's brought back
-		// {"oversized signature", func(v *Vote) { v.Signature = make([]byte, MaxSignatureSize+1) }},
+		{"oversized signature", func(v *Vote) { v.Signature = make([]byte, MaxSignatureSize+1) }},
 	}
 	for _, tc := range testCases {
 		prevote := examplePrevote()
@@ -412,8 +411,7 @@ func TestInvalidPrecommitExtensions(t *testing.T) {
 			v.Extension = []byte("extension")
 			v.ExtensionSignature = nil
 		}},
-		// TODO HV2: Maxsize check for sig is skipped for now. Uncomment when it's brought back
-		// {"oversized vote extension signature", func(v *Vote) { v.ExtensionSignature = make([]byte, MaxSignatureSize+1) }},
+		{"oversized vote extension signature", func(v *Vote) { v.ExtensionSignature = make([]byte, MaxSignatureSize+1) }},
 	}
 	for _, tc := range testCases {
 		precommit := examplePrecommit()

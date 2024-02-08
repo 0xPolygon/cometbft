@@ -72,11 +72,9 @@ func (p *Proposal) ValidateBasic() error {
 	if len(p.Signature) == 0 {
 		return errors.New("signature is missing")
 	}
-	// TODO HV2: ensure skipping signature check is innocuous.
-	// Also need to know how upstream would handle these checks for different keys (should be trivial but better to confirm).
-	// if len(p.Signature) > MaxSignatureSize {
-	// 	return fmt.Errorf("Signature is too big (max: %d)", MaxSignatureSize)
-	// }
+	if len(p.Signature) > MaxSignatureSize {
+		return fmt.Errorf("Signature is too big (max: %d)", MaxSignatureSize)
+	}
 	return nil
 }
 
