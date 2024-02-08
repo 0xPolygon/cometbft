@@ -70,7 +70,6 @@ func TestRootHome(t *testing.T) {
 	}
 
 	for i, tc := range cases {
-
 		idxString := "idx: " + strconv.Itoa(i)
 
 		err := testSetup(t, root, tc.args, tc.env)
