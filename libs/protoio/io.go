@@ -59,7 +59,6 @@ type marshaler interface {
 }
 
 func getSize(v interface{}) (int, bool) {
-
 	if sz, ok := v.(interface {
 		Size() (n int)
 	}); ok {
