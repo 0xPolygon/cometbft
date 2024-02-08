@@ -457,10 +457,6 @@ func BuildLastCommitInfo(block *types.Block, lastValSet *types.ValidatorSet, ini
 		))
 	}
 
-	//
-	// Deliver tx
-	//
-
 	votes := make([]abci.VoteInfo, block.LastCommit.Size())
 	for i, val := range lastValSet.Validators {
 		commitSig := block.LastCommit.Signatures[i]
@@ -469,10 +465,6 @@ func BuildLastCommitInfo(block *types.Block, lastValSet *types.ValidatorSet, ini
 			BlockIdFlag: cmtproto.BlockIDFlag(commitSig.BlockIDFlag),
 		}
 	}
-
-	//
-	// End block
-	//
 
 	return abci.CommitInfo{
 		Round: block.LastCommit.Round,
