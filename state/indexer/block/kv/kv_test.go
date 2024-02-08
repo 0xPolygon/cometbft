@@ -376,7 +376,6 @@ func TestBigInt(t *testing.T) {
 			results: []int64{1},
 		},
 		"query matches fields with big int and height - no match": {
-
 			q:       query.MustCompile("end_event.foo = " + bigInt + " AND end_event.bar = 500 AND block.height = 2"),
 			results: []int64{},
 		},
