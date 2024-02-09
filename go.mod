@@ -297,3 +297,12 @@ require (
 )
 
 replace github.com/ethereum/go-ethereum => github.com/maticnetwork/bor v1.0.4
+
+retract (
+	// a regression was introduced
+	v0.38.4
+	// a breaking change was introduced
+	v0.38.3
+	// superseeded by v0.38.3 because of ASA-2024-001
+	[v0.38.0, v0.38.2]
+)

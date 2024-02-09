@@ -676,9 +676,9 @@ func (cs CommitSig) ValidateBasic() error {
 		if len(cs.Signature) == 0 {
 			return errors.New("signature is missing")
 		}
-		// if len(cs.Signature) > MaxSignatureSize {
-		// 	return fmt.Errorf("signature is too big (max: %d)", MaxSignatureSize)
-		// }
+		if len(cs.Signature) > MaxSignatureSize {
+			return fmt.Errorf("signature is too big (max: %d)", MaxSignatureSize)
+		}
 	}
 
 	return nil
@@ -748,9 +748,9 @@ func (ecs ExtendedCommitSig) ValidateBasic() error {
 		if len(ecs.Extension) > MaxVoteExtensionSize {
 			return fmt.Errorf("vote extension is too big (max: %d)", MaxVoteExtensionSize)
 		}
-		// if len(ecs.ExtensionSignature) > MaxSignatureSize {
-		// 	return fmt.Errorf("vote extension signature is too big (max: %d)", MaxSignatureSize)
-		// }
+		if len(ecs.ExtensionSignature) > MaxSignatureSize {
+			return fmt.Errorf("vote extension signature is too big (max: %d)", MaxSignatureSize)
+		}
 		return nil
 	}
 

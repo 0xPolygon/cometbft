@@ -124,6 +124,8 @@ func ToRequestFinalizeBlock(req *RequestFinalizeBlock) *Request {
 	}
 }
 
+//----------------------------------------
+
 func ToResponseException(errStr string) *Response {
 	return &Response{
 		Value: &Response_Exception{&ResponseException{Error: errStr}},
