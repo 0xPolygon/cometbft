@@ -1,24 +1,35 @@
 package core
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
+	cmtjson "github.com/cometbft/cometbft/libs/json"
 	"github.com/cometbft/cometbft/p2p"
+	na "github.com/cometbft/cometbft/p2p/netaddr"
+	ni "github.com/cometbft/cometbft/p2p/nodeinfo"
 	ctypes "github.com/cometbft/cometbft/rpc/core/types"
 	rpctypes "github.com/cometbft/cometbft/rpc/jsonrpc/types"
+	"github.com/cometbft/cometbft/types"
 )
 
 // NetInfo returns network info.
 // More: https://docs.cometbft.com/main/rpc/#/Info/net_info
 func (env *Environment) NetInfo(*rpctypes.Context) (*ctypes.ResultNetInfo, error) {
-	peersList := env.P2PPeers.Peers().List()
-	peers := make([]ctypes.Peer, 0, len(peersList))
-	for _, peer := range peersList {
-		nodeInfo, ok := peer.NodeInfo().(p2p.DefaultNodeInfo)
+	peers := make([]ctypes.Peer, 0)
+	var err error
+	env.P2PPeers.Peers().ForEach(func(peer p2p.Peer) {
+		nodeInfo, ok := peer.NodeInfo().(ni.Default)
 		if !ok {
-			return nil, fmt.Errorf("peer.NodeInfo() is not DefaultNodeInfo")
+			err = ErrInvalidNodeType{
+				PeerID:   string(peer.ID()),
+				Expected: fmt.Sprintf("%T", ni.Default{}),
+				Actual:   fmt.Sprintf("%T", peer.NodeInfo()),
+			}
+			return
 		}
 		peers = append(peers, ctypes.Peer{
 			NodeInfo:         nodeInfo,
@@ -26,6 +37,9 @@ func (env *Environment) NetInfo(*rpctypes.Context) (*ctypes.ResultNetInfo, error
 			ConnectionStatus: peer.Status(),
 			RemoteIP:         peer.RemoteIP().String(),
 		})
+	})
+	if err != nil {
+		return nil, err
 	}
 	// TODO: Should we include PersistentPeers and Seeds in here?
 	// PRO: useful info
@@ -97,32 +111,70 @@ func (env *Environment) UnsafeDialPeers(
 // Genesis returns genesis file.
 // More: https://docs.cometbft.com/main/rpc/#/Info/genesis
 func (env *Environment) Genesis(*rpctypes.Context) (*ctypes.ResultGenesis, error) {
-	if len(env.genChunks) > 1 {
-		return nil, errors.New("genesis response is large, please use the genesis_chunked API instead")
+	if len(env.genesisChunksFiles) > 0 {
+		return nil, ErrGenesisRespSize
 	}
 
-	return &ctypes.ResultGenesis{Genesis: env.GenDoc}, nil
+	fGenesis, err := os.ReadFile(env.GenesisFilePath)
+	if err != nil {
+		return nil, fmt.Errorf("retrieving genesis file from disk: %s", err)
+	}
+
+	genDoc := types.GenesisDoc{}
+	if err = cmtjson.Unmarshal(fGenesis, &genDoc); err != nil {
+		formatStr := "genesis file JSON format is invalid: %s"
+		return nil, fmt.Errorf(formatStr, err)
+	}
+
+	return &ctypes.ResultGenesis{Genesis: &genDoc}, nil
 }
 
-func (env *Environment) GenesisChunked(_ *rpctypes.Context, chunk uint) (*ctypes.ResultGenesisChunk, error) {
-	if env.genChunks == nil {
-		return nil, fmt.Errorf("service configuration error, genesis chunks are not initialized")
+func (env *Environment) GenesisChunked(
+	_ *rpctypes.Context,
+	chunkID uint,
+) (*ctypes.ResultGenesisChunk, error) {
+	if len(env.genesisChunksFiles) == 0 {
+		// See discussion in the following PR for why we still serve chunk 0 even
+		// if env.genChunks is nil:
+		// https://github.com/cometbft/cometbft/pull/4235#issuecomment-2389109521
+		if chunkID == 0 {
+			fGenesis, err := os.ReadFile(env.GenesisFilePath)
+			if err != nil {
+				return nil, fmt.Errorf("retrieving genesis file from disk: %w", err)
+			}
+
+			genesisBase64 := base64.StdEncoding.EncodeToString(fGenesis)
+
+			resp := &ctypes.ResultGenesisChunk{
+				TotalChunks: 1,
+				ChunkNumber: 0,
+				Data:        genesisBase64,
+			}
+
+			return resp, nil
+		}
+
+		return nil, ErrServiceConfig{ErrNoChunks}
 	}
 
-	if len(env.genChunks) == 0 {
-		return nil, fmt.Errorf("service configuration error, there are no chunks")
+	id := int(chunkID)
+
+	if id > len(env.genesisChunksFiles)-1 {
+		return nil, ErrInvalidChunkID{id, len(env.genesisChunksFiles) - 1}
 	}
 
-	id := int(chunk)
-
-	if id > len(env.genChunks)-1 {
-		return nil, fmt.Errorf("there are %d chunks, %d is invalid", len(env.genChunks)-1, id)
+	chunkPath := env.genesisChunksFiles[id]
+	chunk, err := os.ReadFile(chunkPath)
+	if err != nil {
+		return nil, fmt.Errorf("retrieving chunk %d from disk: %w", id, err)
 	}
+
+	chunkBase64 := base64.StdEncoding.EncodeToString(chunk)
 
 	return &ctypes.ResultGenesisChunk{
-		TotalChunks: len(env.genChunks),
+		TotalChunks: len(env.genesisChunksFiles),
 		ChunkNumber: id,
-		Data:        env.genChunks[id],
+		Data:        chunkBase64,
 	}, nil
 }
 
@@ -130,13 +182,11 @@ func getIDs(peers []string) ([]string, error) {
 	ids := make([]string, 0, len(peers))
 
 	for _, peer := range peers {
-
 		spl := strings.Split(peer, "@")
 		if len(spl) != 2 {
-			return nil, p2p.ErrNetAddressNoID{Addr: peer}
+			return nil, na.ErrNoID{Addr: peer}
 		}
 		ids = append(ids, spl[0])
-
 	}
 	return ids, nil
 }

@@ -20,6 +20,7 @@ const (
 	EventNewBlockHeader      = "NewBlockHeader"
 	EventNewBlockEvents      = "NewBlockEvents"
 	EventNewEvidence         = "NewEvidence"
+	EventPendingTx           = "PendingTx"
 	EventTx                  = "Tx"
 	EventValidatorSetUpdates = "ValidatorSetUpdates"
 
@@ -42,7 +43,7 @@ const (
 // ENCODING / DECODING
 
 // TMEventData implements events.EventData.
-type TMEventData interface {
+type TMEventData interface { //nolint:revive // this empty interface angers the linter
 	// empty interface
 }
 
@@ -66,7 +67,7 @@ func init() {
 type EventDataNewBlock struct {
 	Block               *Block                     `json:"block"`
 	BlockID             BlockID                    `json:"block_id"`
-	ResultFinalizeBlock abci.ResponseFinalizeBlock `json:"result_finalize_block"`
+	ResultFinalizeBlock abci.FinalizeBlockResponse `json:"result_finalize_block"`
 }
 
 type EventDataNewBlockHeader struct {
@@ -84,12 +85,17 @@ type EventDataNewEvidence struct {
 	Evidence Evidence `json:"evidence"`
 }
 
-// All txs fire EventDataTx
+// All txs fire EventDataPendingTx.
+type EventDataPendingTx struct {
+	Tx []byte `json:"tx"`
+}
+
+// All txs fire EventDataTx.
 type EventDataTx struct {
 	abci.TxResult
 }
 
-// NOTE: This goes into the replay WAL
+// NOTE: This goes into the replay WAL.
 type EventDataRoundState struct {
 	Height int64  `json:"height"`
 	Round  int32  `json:"round"`
@@ -134,11 +140,11 @@ const (
 	EventTypeKey = "tm.event"
 
 	// TxHashKey is a reserved key, used to specify transaction's hash.
-	// see EventBus#PublishEventTx
+	// see EventBus#PublishEventTx.
 	TxHashKey = "tx.hash"
 
 	// TxHeightKey is a reserved key, used to specify transaction block's height.
-	// see EventBus#PublishEventTx
+	// see EventBus#PublishEventTx.
 	TxHeightKey = "tx.height"
 
 	// BlockHeightKey is a reserved key used for indexing FinalizeBlock events.
@@ -172,16 +178,17 @@ func QueryForEvent(eventType string) cmtpubsub.Query {
 	return cmtquery.MustCompile(fmt.Sprintf("%s='%s'", EventTypeKey, eventType))
 }
 
-// BlockEventPublisher publishes all block related events
+// BlockEventPublisher publishes all block related events.
 type BlockEventPublisher interface {
 	PublishEventNewBlock(block EventDataNewBlock) error
 	PublishEventNewBlockHeader(header EventDataNewBlockHeader) error
 	PublishEventNewBlockEvents(events EventDataNewBlockEvents) error
 	PublishEventNewEvidence(evidence EventDataNewEvidence) error
-	PublishEventTx(EventDataTx) error
-	PublishEventValidatorSetUpdates(EventDataValidatorSetUpdates) error
+	PublishEventPendingTx(tx EventDataPendingTx) error
+	PublishEventTx(tx EventDataTx) error
+	PublishEventValidatorSetUpdates(updates EventDataValidatorSetUpdates) error
 }
 
 type TxEventPublisher interface {
-	PublishEventTx(EventDataTx) error
+	PublishEventTx(tx EventDataTx) error
 }

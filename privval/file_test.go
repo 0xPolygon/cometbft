@@ -10,73 +10,96 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/cometbft/cometbft/crypto"
 	"github.com/cometbft/cometbft/crypto/ed25519"
 	"github.com/cometbft/cometbft/crypto/tmhash"
+	kt "github.com/cometbft/cometbft/internal/keytypes"
+	cmtrand "github.com/cometbft/cometbft/internal/rand"
 	cmtjson "github.com/cometbft/cometbft/libs/json"
-	cmtrand "github.com/cometbft/cometbft/libs/rand"
-	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/cometbft/cometbft/types"
 	cmttime "github.com/cometbft/cometbft/types/time"
 )
 
 func TestGenLoadValidator(t *testing.T) {
-	privVal, tempKeyFileName, tempStateFileName := newTestFilePV(t)
+	for _, keyType := range kt.ListSupportedKeyTypes() {
+		t.Run(keyType, func(t *testing.T) {
+			keyGenF := func() (crypto.PrivKey, error) {
+				return kt.GenPrivKey(keyType)
+			}
+			privVal, tempKeyFileName, tempStateFileName := newTestFilePV(t, keyGenF)
 
-	height := int64(100)
-	privVal.LastSignState.Height = height
-	privVal.Save()
-	addr := privVal.GetAddress()
+			height := int64(100)
+			privVal.LastSignState.Height = height
+			privVal.Save()
+			addr := privVal.GetAddress()
 
-	privVal = LoadFilePV(tempKeyFileName, tempStateFileName)
-	assert.Equal(t, addr, privVal.GetAddress(), "expected privval addr to be the same")
-	assert.Equal(t, height, privVal.LastSignState.Height, "expected privval.LastHeight to have been saved")
+			privVal = LoadFilePV(tempKeyFileName, tempStateFileName)
+			assert.Equal(t, addr, privVal.GetAddress(), "expected privval addr to be the same")
+			assert.Equal(t, height, privVal.LastSignState.Height, "expected privval.LastHeight to have been saved")
+		})
+	}
 }
 
 func TestResetValidator(t *testing.T) {
-	privVal, _, tempStateFileName := newTestFilePV(t)
-	emptyState := FilePVLastSignState{filePath: tempStateFileName}
+	for _, keyType := range kt.ListSupportedKeyTypes() {
+		t.Run(keyType, func(t *testing.T) {
+			keyGenF := func() (crypto.PrivKey, error) {
+				return kt.GenPrivKey(keyType)
+			}
+			privVal, _, tempStateFileName := newTestFilePV(t, keyGenF)
+			emptyState := FilePVLastSignState{filePath: tempStateFileName}
 
-	// new priv val has empty state
-	assert.Equal(t, privVal.LastSignState, emptyState)
+			// new priv val has empty state
+			assert.Equal(t, privVal.LastSignState, emptyState)
 
-	// test vote
-	height, round := int64(10), int32(1)
-	voteType := cmtproto.PrevoteType
-	randBytes := cmtrand.Bytes(tmhash.Size)
-	blockID := types.BlockID{Hash: randBytes, PartSetHeader: types.PartSetHeader{}}
-	vote := newVote(privVal.Key.Address, 0, height, round, voteType, blockID, nil)
-	err := privVal.SignVote("mychainid", vote.ToProto())
-	assert.NoError(t, err, "expected no error signing vote")
+			// test vote
+			height, round := int64(10), int32(1)
+			voteType := types.PrevoteType
+			randBytes := cmtrand.Bytes(tmhash.Size)
+			blockID := types.BlockID{Hash: randBytes, PartSetHeader: types.PartSetHeader{}}
+			vote := newVote(privVal.Key.Address, height, round, voteType, blockID)
+			err := privVal.SignVote("mychainid", vote.ToProto(), false)
+			require.NoError(t, err, "expected no error signing vote")
 
-	// priv val after signing is not same as empty
-	assert.NotEqual(t, privVal.LastSignState, emptyState)
+			// priv val after signing is not same as empty
+			assert.NotEqual(t, privVal.LastSignState, emptyState)
 
-	// priv val after AcceptNewConnection is same as empty
-	privVal.Reset()
-	assert.Equal(t, privVal.LastSignState, emptyState)
+			// priv val after AcceptNewConnection is same as empty
+			privVal.Reset()
+			assert.Equal(t, privVal.LastSignState, emptyState)
+		})
+	}
 }
 
 func TestLoadOrGenValidator(t *testing.T) {
-	assert := assert.New(t)
+	for _, keyType := range kt.ListSupportedKeyTypes() {
+		t.Run(keyType, func(t *testing.T) {
+			assert := assert.New(t)
 
-	tempKeyFile, err := os.CreateTemp("", "priv_validator_key_")
-	require.Nil(t, err)
-	tempStateFile, err := os.CreateTemp("", "priv_validator_state_")
-	require.Nil(t, err)
+			tempKeyFile, err := os.CreateTemp("", "priv_validator_key_"+keyType+"_")
+			require.NoError(t, err)
+			tempStateFile, err := os.CreateTemp("", "priv_validator_state_"+keyType+"_")
+			require.NoError(t, err)
 
-	tempKeyFilePath := tempKeyFile.Name()
-	if err := os.Remove(tempKeyFilePath); err != nil {
-		t.Error(err)
+			tempKeyFilePath := tempKeyFile.Name()
+			err = os.Remove(tempKeyFilePath)
+			require.NoError(t, err)
+			tempStateFilePath := tempStateFile.Name()
+			err = os.Remove(tempStateFilePath)
+			require.NoError(t, err)
+
+			keyGenF := func() (crypto.PrivKey, error) {
+				return kt.GenPrivKey(keyType)
+			}
+			privVal, err := LoadOrGenFilePV(tempKeyFilePath, tempStateFilePath, keyGenF)
+			require.NoError(t, err)
+			addr := privVal.GetAddress()
+			// passing nil because we won't generate this time, so doesn't matter
+			privVal, err = LoadOrGenFilePV(tempKeyFilePath, tempStateFilePath, nil)
+			require.NoError(t, err)
+			assert.Equal(addr, privVal.GetAddress(), "expected privval addr to be the same")
+		})
 	}
-	tempStateFilePath := tempStateFile.Name()
-	if err := os.Remove(tempStateFilePath); err != nil {
-		t.Error(err)
-	}
-
-	privVal := LoadOrGenFilePV(tempKeyFilePath, tempStateFilePath)
-	addr := privVal.GetAddress()
-	privVal = LoadOrGenFilePV(tempKeyFilePath, tempStateFilePath)
-	assert.Equal(addr, privVal.GetAddress(), "expected privval addr to be the same")
 }
 
 func TestUnmarshalValidatorState(t *testing.T) {
@@ -91,7 +114,7 @@ func TestUnmarshalValidatorState(t *testing.T) {
 
 	val := FilePVLastSignState{}
 	err := cmtjson.Unmarshal([]byte(serialized), &val)
-	require.Nil(err, "%+v", err)
+	require.NoError(err, "%+v", err)
 
 	// make sure the values match
 	assert.EqualValues(val.Height, 1)
@@ -100,7 +123,7 @@ func TestUnmarshalValidatorState(t *testing.T) {
 
 	// export it and make sure it is the same
 	out, err := cmtjson.Marshal(val)
-	require.Nil(err, "%+v", err)
+	require.NoError(err, "%+v", err)
 	assert.JSONEq(serialized, string(out))
 }
 
@@ -130,7 +153,7 @@ func TestUnmarshalValidatorKey(t *testing.T) {
 
 	val := FilePVKey{}
 	err := cmtjson.Unmarshal([]byte(serialized), &val)
-	require.Nil(err, "%+v", err)
+	require.NoError(err, "%+v", err)
 
 	// make sure the values match
 	assert.EqualValues(addr, val.Address)
@@ -139,110 +162,173 @@ func TestUnmarshalValidatorKey(t *testing.T) {
 
 	// export it and make sure it is the same
 	out, err := cmtjson.Marshal(val)
-	require.Nil(err, "%+v", err)
+	require.NoError(err, "%+v", err)
 	assert.JSONEq(serialized, string(out))
 }
 
 func TestSignVote(t *testing.T) {
-	assert := assert.New(t)
+	for _, keyType := range kt.ListSupportedKeyTypes() {
+		t.Run(keyType, func(t *testing.T) {
+			assert := assert.New(t)
+			chainID := "mychainid" + keyType
 
-	privVal, _, _ := newTestFilePV(t)
+			keyGenF := func() (crypto.PrivKey, error) {
+				return kt.GenPrivKey(keyType)
+			}
+			privVal, _, _ := newTestFilePV(t, keyGenF)
 
-	randbytes := cmtrand.Bytes(tmhash.Size)
-	randbytes2 := cmtrand.Bytes(tmhash.Size)
+			randbytes := cmtrand.Bytes(tmhash.Size)
+			randbytes2 := cmtrand.Bytes(tmhash.Size)
 
-	block1 := types.BlockID{Hash: randbytes,
-		PartSetHeader: types.PartSetHeader{Total: 5, Hash: randbytes}}
-	block2 := types.BlockID{Hash: randbytes2,
-		PartSetHeader: types.PartSetHeader{Total: 10, Hash: randbytes2}}
+			block1 := types.BlockID{
+				Hash:          randbytes,
+				PartSetHeader: types.PartSetHeader{Total: 5, Hash: randbytes},
+			}
+			block2 := types.BlockID{
+				Hash:          randbytes2,
+				PartSetHeader: types.PartSetHeader{Total: 10, Hash: randbytes2},
+			}
 
-	height, round := int64(10), int32(1)
-	voteType := cmtproto.PrevoteType
+			height, round := int64(10), int32(1)
+			voteType := types.PrevoteType
 
-	// sign a vote for first time
-	vote := newVote(privVal.Key.Address, 0, height, round, voteType, block1, nil)
-	v := vote.ToProto()
-	err := privVal.SignVote("mychainid", v)
-	assert.NoError(err, "expected no error signing vote")
+			// sign a vote for first time
+			vote := newVote(privVal.Key.Address, height, round, voteType, block1)
+			v := vote.ToProto()
+			err := privVal.SignVote(chainID, v, false)
+			require.NoError(t, err, "expected no error signing vote")
+			vote.Signature = v.Signature
+			err = vote.ValidateBasic()
+			require.NoError(t, err)
 
-	// try to sign the same vote again; should be fine
-	err = privVal.SignVote("mychainid", v)
-	assert.NoError(err, "expected no error on signing same vote")
+			// Verify vote signature
+			pubKey, err := privVal.GetPubKey()
+			require.NoError(t, err)
+			err = vote.Verify(chainID, pubKey)
+			require.NoError(t, err)
 
-	// now try some bad votes
-	cases := []*types.Vote{
-		newVote(privVal.Key.Address, 0, height, round-1, voteType, block1, nil),   // round regression
-		newVote(privVal.Key.Address, 0, height-1, round, voteType, block1, nil),   // height regression
-		newVote(privVal.Key.Address, 0, height-2, round+4, voteType, block1, nil), // height regression and different round
-		newVote(privVal.Key.Address, 0, height, round, voteType, block2, nil),     // different block
+			// try to sign the same vote again; should be fine
+			err = privVal.SignVote(chainID, v, false)
+			require.NoError(t, err, "expected no error on signing same vote")
+
+			// now try some bad votes
+			cases := []*types.Vote{
+				newVote(privVal.Key.Address, height, round-1, voteType, block1),   // round regression
+				newVote(privVal.Key.Address, height-1, round, voteType, block1),   // height regression
+				newVote(privVal.Key.Address, height-2, round+4, voteType, block1), // height regression and different round
+				newVote(privVal.Key.Address, height, round, voteType, block2),     // different block
+			}
+
+			for _, c := range cases {
+				cpb := c.ToProto()
+				err = privVal.SignVote(chainID, cpb, false)
+				require.Error(t, err, "expected error on signing conflicting vote")
+			}
+
+			// try signing a vote with a different time stamp
+			sig := vote.Signature
+			vote.Signature = nil
+			vote.Timestamp = vote.Timestamp.Add(time.Duration(1000))
+			v2 := vote.ToProto()
+			err = privVal.SignVote(chainID, v2, false)
+			require.NoError(t, err)
+			assert.Equal(sig, v2.Signature)
+		})
 	}
-
-	for _, c := range cases {
-		cpb := c.ToProto()
-		err = privVal.SignVote("mychainid", cpb)
-		assert.Error(err, "expected error on signing conflicting vote")
-	}
-
-	// try signing a vote with a different time stamp
-	sig := vote.Signature
-	vote.Timestamp = vote.Timestamp.Add(time.Duration(1000))
-	err = privVal.SignVote("mychainid", v)
-	assert.NoError(err)
-	assert.Equal(sig, vote.Signature)
 }
 
 func TestSignProposal(t *testing.T) {
-	assert := assert.New(t)
+	for _, keyType := range kt.ListSupportedKeyTypes() {
+		t.Run(keyType, func(t *testing.T) {
+			assert := assert.New(t)
+			chainID := "mychainid" + keyType
 
-	privVal, _, _ := newTestFilePV(t)
+			keyGenF := func() (crypto.PrivKey, error) {
+				return kt.GenPrivKey(keyType)
+			}
+			privVal, _, _ := newTestFilePV(t, keyGenF)
 
-	randbytes := cmtrand.Bytes(tmhash.Size)
-	randbytes2 := cmtrand.Bytes(tmhash.Size)
+			randbytes := cmtrand.Bytes(tmhash.Size)
+			randbytes2 := cmtrand.Bytes(tmhash.Size)
 
-	block1 := types.BlockID{Hash: randbytes,
-		PartSetHeader: types.PartSetHeader{Total: 5, Hash: randbytes}}
-	block2 := types.BlockID{Hash: randbytes2,
-		PartSetHeader: types.PartSetHeader{Total: 10, Hash: randbytes2}}
-	height, round := int64(10), int32(1)
+			block1 := types.BlockID{
+				Hash:          randbytes,
+				PartSetHeader: types.PartSetHeader{Total: 5, Hash: randbytes},
+			}
+			block2 := types.BlockID{
+				Hash:          randbytes2,
+				PartSetHeader: types.PartSetHeader{Total: 10, Hash: randbytes2},
+			}
+			height, round := int64(10), int32(1)
 
-	// sign a proposal for first time
-	proposal := newProposal(height, round, block1)
-	pbp := proposal.ToProto()
-	err := privVal.SignProposal("mychainid", pbp)
-	assert.NoError(err, "expected no error signing proposal")
+			// sign a proposal for first time
+			proposal := newProposal(height, round, block1)
+			pbp := proposal.ToProto()
+			err := privVal.SignProposal(chainID, pbp)
+			sig := pbp.Signature
+			require.NoError(t, err, "expected no error signing proposal")
 
-	// try to sign the same proposal again; should be fine
-	err = privVal.SignProposal("mychainid", pbp)
-	assert.NoError(err, "expected no error on signing same proposal")
+			// try to sign the same proposal again; should be fine
+			err = privVal.SignProposal(chainID, pbp)
+			require.NoError(t, err, "expected no error on signing same proposal")
 
-	// now try some bad Proposals
-	cases := []*types.Proposal{
-		newProposal(height, round-1, block1),   // round regression
-		newProposal(height-1, round, block1),   // height regression
-		newProposal(height-2, round+4, block1), // height regression and different round
-		newProposal(height, round, block2),     // different block
+			// Verify proposal signature
+			pubKey, err := privVal.GetPubKey()
+			require.NoError(t, err)
+			assert.True(pubKey.VerifySignature(types.ProposalSignBytes(chainID, pbp), sig))
+
+			// now try some bad Proposals
+			cases := []*types.Proposal{
+				newProposal(height, round-1, block1),   // round regression
+				newProposal(height-1, round, block1),   // height regression
+				newProposal(height-2, round+4, block1), // height regression and different round
+				newProposal(height, round, block2),     // different block
+			}
+
+			for _, c := range cases {
+				err = privVal.SignProposal(chainID, c.ToProto())
+				require.Error(t, err, "expected error on signing conflicting proposal")
+			}
+
+			// try signing a proposal with a different time stamp
+			proposal.Timestamp = proposal.Timestamp.Add(time.Duration(1000))
+			pbp2 := proposal.ToProto()
+			err = privVal.SignProposal(chainID, pbp2)
+			require.NoError(t, err)
+			assert.Equal(sig, pbp2.Signature)
+		})
 	}
+}
 
-	for _, c := range cases {
-		err = privVal.SignProposal("mychainid", c.ToProto())
-		assert.Error(err, "expected error on signing conflicting proposal")
+func TestSignBytes(t *testing.T) {
+	for _, keyType := range kt.ListSupportedKeyTypes() {
+		t.Run(keyType, func(t *testing.T) {
+			keyGenF := func() (crypto.PrivKey, error) {
+				return kt.GenPrivKey(keyType)
+			}
+			privVal, _, _ := newTestFilePV(t, keyGenF)
+			testBytes := []byte("test bytes for signing TODO: REMOVE ME AFTER FIXING BLS")
+
+			// Sign the test bytes
+			sig, err := privVal.SignBytes(testBytes)
+			require.NoError(t, err, "expected no error signing bytes")
+
+			// Verify the signature
+			pubKey, err := privVal.GetPubKey()
+			require.NoError(t, err, "expected no error getting public key")
+			assert.True(t, pubKey.VerifySignature(testBytes, sig), "signature verification failed")
+		})
 	}
-
-	// try signing a proposal with a different time stamp
-	sig := proposal.Signature
-	proposal.Timestamp = proposal.Timestamp.Add(time.Duration(1000))
-	err = privVal.SignProposal("mychainid", pbp)
-	assert.NoError(err)
-	assert.Equal(sig, proposal.Signature)
 }
 
 func TestDifferByTimestamp(t *testing.T) {
 	tempKeyFile, err := os.CreateTemp("", "priv_validator_key_")
-	require.Nil(t, err)
+	require.NoError(t, err)
 	tempStateFile, err := os.CreateTemp("", "priv_validator_state_")
-	require.Nil(t, err)
+	require.NoError(t, err)
 
-	privVal := GenFilePV(tempKeyFile.Name(), tempStateFile.Name())
+	privVal, err := GenFilePV(tempKeyFile.Name(), tempStateFile.Name(), nil)
+	require.NoError(t, err)
 	randbytes := cmtrand.Bytes(tmhash.Size)
 	block1 := types.BlockID{Hash: randbytes, PartSetHeader: types.PartSetHeader{Total: 5, Hash: randbytes}}
 	height, round := int64(10), int32(1)
@@ -253,7 +339,7 @@ func TestDifferByTimestamp(t *testing.T) {
 		proposal := newProposal(height, round, block1)
 		pb := proposal.ToProto()
 		err := privVal.SignProposal(chainID, pb)
-		assert.NoError(t, err, "expected no error signing proposal")
+		require.NoError(t, err, "expected no error signing proposal")
 		signBytes := types.ProposalSignBytes(chainID, pb)
 
 		sig := proposal.Signature
@@ -264,7 +350,7 @@ func TestDifferByTimestamp(t *testing.T) {
 		var emptySig []byte
 		proposal.Signature = emptySig
 		err = privVal.SignProposal("mychainid", pb)
-		assert.NoError(t, err, "expected no error on signing same proposal")
+		require.NoError(t, err, "expected no error on signing same proposal")
 
 		assert.Equal(t, timeStamp, pb.Timestamp)
 		assert.Equal(t, signBytes, types.ProposalSignBytes(chainID, pb))
@@ -273,12 +359,12 @@ func TestDifferByTimestamp(t *testing.T) {
 
 	// test vote
 	{
-		voteType := cmtproto.PrevoteType
+		voteType := types.PrevoteType
 		blockID := types.BlockID{Hash: randbytes, PartSetHeader: types.PartSetHeader{}}
-		vote := newVote(privVal.Key.Address, 0, height, round, voteType, blockID, nil)
+		vote := newVote(privVal.Key.Address, height, round, voteType, blockID)
 		v := vote.ToProto()
-		err := privVal.SignVote("mychainid", v)
-		assert.NoError(t, err, "expected no error signing vote")
+		err := privVal.SignVote("mychainid", v, false)
+		require.NoError(t, err, "expected no error signing vote")
 
 		signBytes := types.VoteSignBytes(chainID, v)
 		sig := v.Signature
@@ -290,8 +376,8 @@ func TestDifferByTimestamp(t *testing.T) {
 		var emptySig []byte
 		v.Signature = emptySig
 		v.ExtensionSignature = emptySig
-		err = privVal.SignVote("mychainid", v)
-		assert.NoError(t, err, "expected no error on signing same vote")
+		err = privVal.SignVote("mychainid", v, false)
+		require.NoError(t, err, "expected no error on signing same vote")
 
 		assert.Equal(t, timeStamp, v.Timestamp)
 		assert.Equal(t, signBytes, types.VoteSignBytes(chainID, v))
@@ -300,10 +386,10 @@ func TestDifferByTimestamp(t *testing.T) {
 	}
 }
 
-func TestVoteExtensionsAreAlwaysSigned(t *testing.T) {
-	privVal, _, _ := newTestFilePV(t)
+func TestVoteExtensionsAreSignedIfSignExtensionIsTrue(t *testing.T) {
+	privVal, _, _ := newTestFilePV(t, nil)
 	pubKey, err := privVal.GetPubKey()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	block := types.BlockID{
 		Hash:          cmtrand.Bytes(tmhash.Size),
@@ -311,14 +397,14 @@ func TestVoteExtensionsAreAlwaysSigned(t *testing.T) {
 	}
 
 	height, round := int64(10), int32(1)
-	voteType := cmtproto.PrecommitType
+	voteType := types.PrecommitType
 
 	// We initially sign this vote without an extension
-	vote1 := newVote(privVal.Key.Address, 0, height, round, voteType, block, nil)
+	vote1 := newVote(privVal.Key.Address, height, round, voteType, block)
 	vpb1 := vote1.ToProto()
 
-	err = privVal.SignVote("mychainid", vpb1)
-	assert.NoError(t, err, "expected no error signing vote")
+	err = privVal.SignVote("mychainid", vpb1, true)
+	require.NoError(t, err, "expected no error signing vote")
 	assert.NotNil(t, vpb1.ExtensionSignature)
 
 	vesb1 := types.VoteExtensionSignBytes("mychainid", vpb1)
@@ -330,8 +416,8 @@ func TestVoteExtensionsAreAlwaysSigned(t *testing.T) {
 	vote2.Extension = []byte("new extension")
 	vpb2 := vote2.ToProto()
 
-	err = privVal.SignVote("mychainid", vpb2)
-	assert.NoError(t, err, "expected no error signing same vote with manipulated vote extension")
+	err = privVal.SignVote("mychainid", vpb2, true)
+	require.NoError(t, err, "expected no error signing same vote with manipulated vote extension")
 
 	// We need to ensure that a valid new extension signature has been created
 	// that validates against the vote extension sign bytes with the new
@@ -349,8 +435,8 @@ func TestVoteExtensionsAreAlwaysSigned(t *testing.T) {
 	vpb2.Signature = nil
 	vpb2.ExtensionSignature = nil
 
-	err = privVal.SignVote("mychainid", vpb2)
-	assert.NoError(t, err, "expected no error signing same vote with manipulated timestamp and vote extension")
+	err = privVal.SignVote("mychainid", vpb2, true)
+	require.NoError(t, err, "expected no error signing same vote with manipulated timestamp and vote extension")
 	assert.Equal(t, expectedTimestamp, vpb2.Timestamp)
 
 	vesb3 := types.VoteExtensionSignBytes("mychainid", vpb2)
@@ -358,17 +444,37 @@ func TestVoteExtensionsAreAlwaysSigned(t *testing.T) {
 	assert.False(t, pubKey.VerifySignature(vesb1, vpb2.ExtensionSignature))
 }
 
-func newVote(addr types.Address, idx int32, height int64, round int32,
-	typ cmtproto.SignedMsgType, blockID types.BlockID, extension []byte) *types.Vote {
+func TestVoteExtensionsAreNotSignedIfSignExtensionIsFalse(t *testing.T) {
+	privVal, _, _ := newTestFilePV(t, nil)
+
+	block := types.BlockID{
+		Hash:          cmtrand.Bytes(tmhash.Size),
+		PartSetHeader: types.PartSetHeader{Total: 5, Hash: cmtrand.Bytes(tmhash.Size)},
+	}
+
+	height, round := int64(10), int32(1)
+	voteType := types.PrecommitType
+
+	// We initially sign this vote without an extension
+	vote1 := newVote(privVal.Key.Address, height, round, voteType, block)
+	vpb1 := vote1.ToProto()
+
+	err := privVal.SignVote("mychainid", vpb1, false)
+	require.NoError(t, err, "expected no error signing vote")
+	assert.Nil(t, vpb1.ExtensionSignature)
+}
+
+func newVote(addr types.Address, height int64, round int32,
+	typ types.SignedMsgType, blockID types.BlockID,
+) *types.Vote {
 	return &types.Vote{
 		ValidatorAddress: addr,
-		ValidatorIndex:   idx,
+		ValidatorIndex:   0,
 		Height:           height,
 		Round:            round,
 		Type:             typ,
 		Timestamp:        cmttime.Now(),
 		BlockID:          blockID,
-		Extension:        extension,
 	}
 }
 
@@ -381,13 +487,15 @@ func newProposal(height int64, round int32, blockID types.BlockID) *types.Propos
 	}
 }
 
-func newTestFilePV(t *testing.T) (*FilePV, string, string) {
+func newTestFilePV(t *testing.T, keyGenF func() (crypto.PrivKey, error)) (*FilePV, string, string) {
+	t.Helper()
 	tempKeyFile, err := os.CreateTemp(t.TempDir(), "priv_validator_key_")
 	require.NoError(t, err)
 	tempStateFile, err := os.CreateTemp(t.TempDir(), "priv_validator_state_")
 	require.NoError(t, err)
 
-	privVal := GenFilePV(tempKeyFile.Name(), tempStateFile.Name())
+	privVal, err := GenFilePV(tempKeyFile.Name(), tempStateFile.Name(), keyGenF)
+	require.NoError(t, err)
 
 	return privVal, tempKeyFile.Name(), tempStateFile.Name()
 }

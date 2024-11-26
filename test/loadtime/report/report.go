@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gofrs/uuid"
+	"github.com/google/uuid"
 	"gonum.org/v1/gonum/stat"
 
 	"github.com/cometbft/cometbft/test/loadtime/payload"
@@ -20,7 +20,7 @@ import (
 type BlockStore interface {
 	Height() int64
 	Base() int64
-	LoadBlock(int64) *types.Block
+	LoadBlock(height int64) (*types.Block, *types.BlockMeta)
 }
 
 // DataPoint contains the set of data collected for each transaction.
@@ -28,6 +28,7 @@ type DataPoint struct {
 	Duration  time.Duration
 	BlockTime time.Time
 	Hash      []byte
+	Lane      string
 }
 
 // Report contains the data calculated from reading the timestamped transactions
@@ -71,7 +72,7 @@ func (rs *Reports) ErrorCount() int {
 	return rs.errorCount
 }
 
-func (rs *Reports) addDataPoint(id uuid.UUID, l time.Duration, bt time.Time, hash []byte, conns, rate, size uint64) {
+func (rs *Reports) addDataPoint(id uuid.UUID, lane string, l time.Duration, bt time.Time, hash []byte, conns, rate, size uint64) {
 	r, ok := rs.s[id]
 	if !ok {
 		r = Report{
@@ -84,7 +85,7 @@ func (rs *Reports) addDataPoint(id uuid.UUID, l time.Duration, bt time.Time, has
 		}
 		rs.s[id] = r
 	}
-	r.All = append(r.All, DataPoint{Duration: l, BlockTime: bt, Hash: hash})
+	r.All = append(r.All, DataPoint{Duration: l, BlockTime: bt, Hash: hash, Lane: lane})
 	if l > r.Max {
 		r.Max = l
 	}
@@ -119,7 +120,6 @@ func (rs *Reports) calculateAll() {
 		}
 		return rs.l[i].Connections < rs.l[j].Connections
 	})
-
 }
 
 func (rs *Reports) addError() {
@@ -131,6 +131,7 @@ func (rs *Reports) addError() {
 func GenerateFromBlockStore(s BlockStore) (*Reports, error) {
 	type payloadData struct {
 		id                      uuid.UUID
+		lane                    string
 		l                       time.Duration
 		bt                      time.Time
 		hash                    []byte
@@ -167,16 +168,17 @@ func GenerateFromBlockStore(s BlockStore) (*Reports, error) {
 					continue
 				}
 
-				l := b.bt.Sub(p.Time.AsTime())
-				idb := (*[16]byte)(p.Id)
+				l := b.bt.Sub(p.GetTime().AsTime())
+				idb := (*[16]byte)(p.GetId())
 				pdc <- payloadData{
 					l:           l,
 					bt:          b.bt,
 					hash:        b.tx.Hash(),
 					id:          uuid.UUID(*idb),
-					connections: p.Connections,
-					rate:        p.Rate,
-					size:        p.Size,
+					lane:        p.GetLane(),
+					connections: p.GetConnections(),
+					rate:        p.GetRate(),
+					size:        p.GetSize(),
 				}
 			}
 		}()
@@ -188,7 +190,7 @@ func GenerateFromBlockStore(s BlockStore) (*Reports, error) {
 
 	go func() {
 		base, height := s.Base(), s.Height()
-		prev := s.LoadBlock(base)
+		prev, _ := s.LoadBlock(base)
 		for i := base + 1; i < height; i++ {
 			// Data from two adjacent block are used here simultaneously,
 			// blocks of height H and H+1. The transactions of the block of
@@ -201,7 +203,7 @@ func GenerateFromBlockStore(s BlockStore) (*Reports, error) {
 			// chain contains payload transactions, those transactions will not
 			// be used in the latency calculations because the last block whose
 			// transactions are used is the block one before the last.
-			cur := s.LoadBlock(i)
+			cur, _ := s.LoadBlock(i)
 			for _, tx := range prev.Data.Txs {
 				txc <- txData{tx: tx, bt: cur.Time}
 			}
@@ -214,7 +216,7 @@ func GenerateFromBlockStore(s BlockStore) (*Reports, error) {
 			reports.addError()
 			continue
 		}
-		reports.addDataPoint(pd.id, pd.l, pd.bt, pd.hash, pd.connections, pd.rate, pd.size)
+		reports.addDataPoint(pd.id, pd.lane, pd.l, pd.bt, pd.hash, pd.connections, pd.rate, pd.size)
 	}
 	reports.calculateAll()
 	return reports, nil

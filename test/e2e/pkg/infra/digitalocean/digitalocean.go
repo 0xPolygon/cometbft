@@ -3,6 +3,7 @@ package digitalocean
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -20,8 +21,13 @@ type Provider struct {
 	infra.ProviderData
 }
 
-// Noop currently. Setup is performed externally to the e2e test tool.
 func (p *Provider) Setup() error {
+	for _, n := range p.Testnet.Nodes {
+		if n.ClockSkew != 0 {
+			return fmt.Errorf("node %q contains clock skew configuration (not supported on DO)", n.Name)
+		}
+	}
+
 	return nil
 }
 
@@ -46,6 +52,7 @@ func (p Provider) StartNodes(ctx context.Context, nodes ...*e2e.Node) error {
 
 	return execAnsible(ctx, p.Testnet.Dir, playbookFile, nodeIPs)
 }
+
 func (p Provider) StopTestnet(ctx context.Context) error {
 	nodeIPs := make([]string, len(p.Testnet.Nodes))
 	for i, n := range p.Testnet.Nodes {
@@ -59,6 +66,7 @@ func (p Provider) StopTestnet(ctx context.Context) error {
 	}
 	return execAnsible(ctx, p.Testnet.Dir, playbookFile, nodeIPs)
 }
+
 func (p Provider) Disconnect(ctx context.Context, _ string, ip string) error {
 	playbook := ansiblePerturbConnectionBytes(true)
 	playbookFile := getNextPlaybookFilename()
@@ -67,6 +75,7 @@ func (p Provider) Disconnect(ctx context.Context, _ string, ip string) error {
 	}
 	return execAnsible(ctx, p.Testnet.Dir, playbookFile, []string{ip})
 }
+
 func (p Provider) Reconnect(ctx context.Context, _ string, ip string) error {
 	playbook := ansiblePerturbConnectionBytes(false)
 	playbookFile := getNextPlaybookFilename()
@@ -76,9 +85,13 @@ func (p Provider) Reconnect(ctx context.Context, _ string, ip string) error {
 	return execAnsible(ctx, p.Testnet.Dir, playbookFile, []string{ip})
 }
 
-func (p Provider) CheckUpgraded(_ context.Context, node *e2e.Node) (string, bool, error) {
+func (Provider) CheckUpgraded(_ context.Context, node *e2e.Node) (string, bool, error) {
 	// Upgrade not supported yet by DO provider
 	return node.Name, false, nil
+}
+
+func (Provider) NodeIP(node *e2e.Node) net.IP {
+	return node.ExternalIP
 }
 
 func (p Provider) writePlaybook(yaml, playbook string) error {
@@ -101,7 +114,7 @@ const basePlaybook = `- name: e2e custom playbook
 `
 
 func ansibleAddTask(playbook, name, contents string) string {
-	return playbook + "  - name: " + name + "\n" + contents
+	return playbook + "  - name: " + name + "\n" + contents + "\n"
 }
 
 func ansibleAddSystemdTask(playbook string, starting bool) string {
@@ -109,6 +122,7 @@ func ansibleAddSystemdTask(playbook string, starting bool) string {
 	if starting {
 		startStop = "started"
 	}
+	// testappd is the name of the daemon running the node in the ansible scripts in the qa-infra repo.
 	contents := fmt.Sprintf(`    ansible.builtin.systemd:
       name: testappd
       state: %s
@@ -126,7 +140,7 @@ func ansibleAddShellTasks(playbook, name string, shells ...string) string {
 }
 
 // file as bytes to be written out to disk.
-// ansibleStartBytes generates an Ansible playbook to start the network
+// ansibleStartBytes generates an Ansible playbook to start the network.
 func ansibleSystemdBytes(starting bool) string {
 	return ansibleAddSystemdTask(basePlaybook, starting)
 }
@@ -147,7 +161,7 @@ func ansiblePerturbConnectionBytes(disconnect bool) string {
 }
 
 // ExecCompose runs a Docker Compose command for a testnet.
-func execAnsible(ctx context.Context, dir, playbook string, nodeIPs []string, args ...string) error {
+func execAnsible(ctx context.Context, dir, playbook string, nodeIPs []string, args ...string) error { //nolint:unparam
 	playbook = filepath.Join(dir, playbook)
 	return exec.CommandVerbose(ctx, append(
 		[]string{"ansible-playbook", playbook, "-f", "50", "-u", "root", "--inventory", strings.Join(nodeIPs, ",") + ","},

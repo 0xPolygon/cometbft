@@ -7,7 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/cometbft/cometbft/libs/log"
-
 	"github.com/cometbft/cometbft/libs/pubsub"
 	"github.com/cometbft/cometbft/libs/pubsub/query"
 )

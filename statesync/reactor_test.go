@@ -10,10 +10,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	abci "github.com/cometbft/cometbft/abci/types"
+	ssproto "github.com/cometbft/cometbft/api/cometbft/statesync/v1"
 	"github.com/cometbft/cometbft/config"
 	"github.com/cometbft/cometbft/p2p"
 	p2pmocks "github.com/cometbft/cometbft/p2p/mocks"
-	ssproto "github.com/cometbft/cometbft/proto/tendermint/statesync"
+	"github.com/cometbft/cometbft/p2p/nodekey"
 	proxymocks "github.com/cometbft/cometbft/proxy/mocks"
 )
 
@@ -41,22 +42,21 @@ func TestReactor_Receive_ChunkRequest(t *testing.T) {
 	}
 
 	for name, tc := range testcases {
-		tc := tc
 		t.Run(name, func(t *testing.T) {
 			// Mock ABCI connection to return local snapshots
 			conn := &proxymocks.AppConnSnapshot{}
-			conn.On("LoadSnapshotChunk", mock.Anything, &abci.RequestLoadSnapshotChunk{
+			conn.On("LoadSnapshotChunk", mock.Anything, &abci.LoadSnapshotChunkRequest{
 				Height: tc.request.Height,
 				Format: tc.request.Format,
 				Chunk:  tc.request.Index,
-			}).Return(&abci.ResponseLoadSnapshotChunk{Chunk: tc.chunk}, nil)
+			}).Return(&abci.LoadSnapshotChunkResponse{Chunk: tc.chunk}, nil)
 
 			// Mock peer to store response, if found
 			peer := &p2pmocks.Peer{}
-			peer.On("ID").Return(p2p.ID("id"))
+			peer.On("ID").Return(nodekey.ID("id"))
 			var response *ssproto.ChunkResponse
 			if tc.expectResponse != nil {
-				peer.On("Send", mock.MatchedBy(func(i interface{}) bool {
+				peer.On("Send", mock.MatchedBy(func(i any) bool {
 					e, ok := i.(p2p.Envelope)
 					return ok && e.ChannelID == ChunkChannel
 				})).Run(func(args mock.Arguments) {
@@ -133,11 +133,10 @@ func TestReactor_Receive_SnapshotsRequest(t *testing.T) {
 	}
 
 	for name, tc := range testcases {
-		tc := tc
 		t.Run(name, func(t *testing.T) {
 			// Mock ABCI connection to return local snapshots
 			conn := &proxymocks.AppConnSnapshot{}
-			conn.On("ListSnapshots", mock.Anything, &abci.RequestListSnapshots{}).Return(&abci.ResponseListSnapshots{
+			conn.On("ListSnapshots", mock.Anything, &abci.ListSnapshotsRequest{}).Return(&abci.ListSnapshotsResponse{
 				Snapshots: tc.snapshots,
 			}, nil)
 
@@ -145,8 +144,8 @@ func TestReactor_Receive_SnapshotsRequest(t *testing.T) {
 			responses := []*ssproto.SnapshotsResponse{}
 			peer := &p2pmocks.Peer{}
 			if len(tc.expectResponses) > 0 {
-				peer.On("ID").Return(p2p.ID("id"))
-				peer.On("Send", mock.MatchedBy(func(i interface{}) bool {
+				peer.On("ID").Return(nodekey.ID("id"))
+				peer.On("Send", mock.MatchedBy(func(i any) bool {
 					e, ok := i.(p2p.Envelope)
 					return ok && e.ChannelID == SnapshotChannel
 				})).Run(func(args mock.Arguments) {

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	cmtcrypto "github.com/cometbft/cometbft/api/cometbft/crypto/v1"
 	"github.com/cometbft/cometbft/crypto/tmhash"
-	cmtcrypto "github.com/cometbft/cometbft/proto/tendermint/crypto"
 )
 
 const ProofOpValue = "simple:v"
@@ -38,6 +38,7 @@ func NewValueOp(key []byte, proof *Proof) ValueOp {
 	}
 }
 
+// ValueOpDecoder decodes a cmtcrypto.ProofOp into a ValueOp instance.
 func ValueOpDecoder(pop cmtcrypto.ProofOp) (ProofOperator, error) {
 	if pop.Type != ProofOpValue {
 		return nil, ErrInvalidProof{
@@ -59,6 +60,7 @@ func ValueOpDecoder(pop cmtcrypto.ProofOp) (ProofOperator, error) {
 	return NewValueOp(pop.Key, sp), nil
 }
 
+// ProofOp encodes the ValueOp as a cmtcrypto.ProofOp, which can later be decoded.
 func (op ValueOp) ProofOp() cmtcrypto.ProofOp {
 	pbval := cmtcrypto.ValueOp{
 		Key:   op.key,
@@ -83,6 +85,7 @@ func (op ValueOp) String() string {
 // exceeding 1.
 var ErrTooManyArgs = errors.New("merkle: len(args) != 1")
 
+// Run computes the Merkle root using the ValueOp.
 func (op ValueOp) Run(args [][]byte) ([][]byte, error) {
 	if len(args) != 1 {
 		return nil, ErrTooManyArgs
@@ -104,7 +107,7 @@ func (op ValueOp) Run(args [][]byte) ([][]byte, error) {
 		}
 	}
 
-	rootHash, err := op.Proof.computeRootHash()
+	rootHash, err := op.Proof.computeRootHash(tmhash.New())
 	if err != nil {
 		return nil, err
 	}

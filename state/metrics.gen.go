@@ -3,8 +3,8 @@
 package state
 
 import (
-	"github.com/go-kit/kit/metrics/discard"
-	prometheus "github.com/go-kit/kit/metrics/prometheus"
+	"github.com/cometbft/cometbft/libs/metrics/discard"
+	prometheus "github.com/cometbft/cometbft/libs/metrics/prometheus"
 	stdprometheus "github.com/prometheus/client_golang/prometheus"
 )
 
@@ -14,14 +14,6 @@ func PrometheusMetrics(namespace string, labelsAndValues ...string) *Metrics {
 		labels = append(labels, labelsAndValues[i])
 	}
 	return &Metrics{
-		BlockProcessingTime: prometheus.NewHistogramFrom(stdprometheus.HistogramOpts{
-			Namespace: namespace,
-			Subsystem: MetricsSubsystem,
-			Name:      "block_processing_time",
-			Help:      "Time spent processing FinalizeBlock",
-
-			Buckets: stdprometheus.LinearBuckets(1, 10, 10),
-		}, labels).With(labelsAndValues...),
 		ConsensusParamUpdates: prometheus.NewCounterFrom(stdprometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: MetricsSubsystem,
@@ -88,12 +80,25 @@ func PrometheusMetrics(namespace string, labelsAndValues ...string) *Metrics {
 			Name:      "block_indexer_base_height",
 			Help:      "BlockIndexerBaseHeight shows the first height at which block indices are available",
 		}, labels).With(labelsAndValues...),
+		StoreAccessDurationSeconds: prometheus.NewHistogramFrom(stdprometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: MetricsSubsystem,
+			Name:      "store_access_duration_seconds",
+			Help:      "The duration of accesses to the state store labeled by which method was called on the store.",
+
+			Buckets: stdprometheus.ExponentialBuckets(0.0002, 10, 5),
+		}, append(labels, "method")).With(labelsAndValues...),
+		FireBlockEventsDelaySeconds: prometheus.NewGaugeFrom(stdprometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: MetricsSubsystem,
+			Name:      "fire_block_events_delay_seconds",
+			Help:      "The duration of event firing related to a new block",
+		}, labels).With(labelsAndValues...),
 	}
 }
 
 func NopMetrics() *Metrics {
 	return &Metrics{
-		BlockProcessingTime:                    discard.NewHistogram(),
 		ConsensusParamUpdates:                  discard.NewCounter(),
 		ValidatorSetUpdates:                    discard.NewCounter(),
 		PruningServiceBlockRetainHeight:        discard.NewGauge(),
@@ -105,5 +110,7 @@ func NopMetrics() *Metrics {
 		ABCIResultsBaseHeight:                  discard.NewGauge(),
 		TxIndexerBaseHeight:                    discard.NewGauge(),
 		BlockIndexerBaseHeight:                 discard.NewGauge(),
+		StoreAccessDurationSeconds:             discard.NewHistogram(),
+		FireBlockEventsDelaySeconds:            discard.NewGauge(),
 	}
 }

@@ -5,12 +5,12 @@ import (
 	"errors"
 	"fmt"
 
-	cmtcrypto "github.com/cometbft/cometbft/proto/tendermint/crypto"
+	cmtcrypto "github.com/cometbft/cometbft/api/cometbft/crypto/v1"
 )
 
 var ErrKeyPathNotConsumed = errors.New("merkle: keypath not consumed")
 
-//----------------------------------------
+// ----------------------------------------
 // ProofOp gets converted to an instance of ProofOperator:
 
 // ProofOperator is a layer for calculating intermediate Merkle roots
@@ -21,23 +21,24 @@ var ErrKeyPathNotConsumed = errors.New("merkle: keypath not consumed")
 // ProofOp() encodes the ProofOperator in a generic way so it can later be
 // decoded with OpDecoder.
 type ProofOperator interface {
-	Run([][]byte) ([][]byte, error)
+	Run(leaves [][]byte) ([][]byte, error)
 	GetKey() []byte
 	ProofOp() cmtcrypto.ProofOp
 }
 
-//----------------------------------------
+// ----------------------------------------
 // Operations on a list of ProofOperators
 
 // ProofOperators is a slice of ProofOperator(s).
 // Each operator will be applied to the input value sequentially
-// and the last Merkle root will be verified with already known data
+// and the last Merkle root will be verified with already known data.
 type ProofOperators []ProofOperator
 
 func (poz ProofOperators) VerifyValue(root []byte, keypath string, value []byte) (err error) {
 	return poz.Verify(root, keypath, [][]byte{value})
 }
 
+// Verify applies a series of ProofOperators to verify the provided args (byte slices).
 func (poz ProofOperators) Verify(root []byte, keypath string, args [][]byte) error {
 	keys, err := KeyPathToKeys(keypath)
 	if err != nil {
@@ -76,7 +77,7 @@ func (poz ProofOperators) Verify(root []byte, keypath string, args [][]byte) err
 	return nil
 }
 
-//----------------------------------------
+// ----------------------------------------
 // ProofRuntime - main entrypoint
 
 type OpDecoder func(cmtcrypto.ProofOp) (ProofOperator, error)
@@ -91,6 +92,7 @@ func NewProofRuntime() *ProofRuntime {
 	}
 }
 
+// RegisterOpDecoder registers a new OpDecoder for a specific proof operation type.
 func (prt *ProofRuntime) RegisterOpDecoder(typ string, dec OpDecoder) {
 	_, ok := prt.decoders[typ]
 	if ok {
@@ -99,6 +101,7 @@ func (prt *ProofRuntime) RegisterOpDecoder(typ string, dec OpDecoder) {
 	prt.decoders[typ] = dec
 }
 
+// Decode decodes a cmtcrypto.ProofOp into a ProofOperator using the appropriate decoder.
 func (prt *ProofRuntime) Decode(pop cmtcrypto.ProofOp) (ProofOperator, error) {
 	decoder := prt.decoders[pop.Type]
 	if decoder == nil {
@@ -109,6 +112,7 @@ func (prt *ProofRuntime) Decode(pop cmtcrypto.ProofOp) (ProofOperator, error) {
 	return decoder(pop)
 }
 
+// DecodeProof decodes a list of cmtcrypto.ProofOps into a ProofOperators slice.
 func (prt *ProofRuntime) DecodeProof(proof *cmtcrypto.ProofOps) (ProofOperators, error) {
 	poz := make(ProofOperators, 0, len(proof.Ops))
 	for _, pop := range proof.Ops {
@@ -127,12 +131,13 @@ func (prt *ProofRuntime) VerifyValue(proof *cmtcrypto.ProofOps, root []byte, key
 	return prt.Verify(proof, root, keypath, [][]byte{value})
 }
 
-// TODO In the long run we'll need a method of classifcation of ops,
+// TODO In the long run we'll need a method of classification of ops,
 // whether existence or absence or perhaps a third?
 func (prt *ProofRuntime) VerifyAbsence(proof *cmtcrypto.ProofOps, root []byte, keypath string) (err error) {
 	return prt.Verify(proof, root, keypath, nil)
 }
 
+// Verify verifies a proof by decoding it into ProofOperators.
 func (prt *ProofRuntime) Verify(proof *cmtcrypto.ProofOps, root []byte, keypath string, args [][]byte) (err error) {
 	poz, err := prt.DecodeProof(proof)
 	if err != nil {
@@ -149,5 +154,5 @@ func (prt *ProofRuntime) Verify(proof *cmtcrypto.ProofOps, root []byte, keypath 
 func DefaultProofRuntime() (prt *ProofRuntime) {
 	prt = NewProofRuntime()
 	prt.RegisterOpDecoder(ProofOpValue, ValueOpDecoder)
-	return
+	return prt
 }

@@ -10,21 +10,21 @@ import (
 
 	cmtjson "github.com/cometbft/cometbft/libs/json"
 	"github.com/cometbft/cometbft/libs/log"
-	types "github.com/cometbft/cometbft/rpc/jsonrpc/types"
+	"github.com/cometbft/cometbft/rpc/jsonrpc/types"
 )
 
 // HTTP + URI handler
 
 var reInt = regexp.MustCompile(`^-?[0-9]+$`)
 
-// convert from a function name to the http handler
+// convert from a function name to the http handler.
 func makeHTTPHandler(rpcFunc *RPCFunc, logger log.Logger) func(http.ResponseWriter, *http.Request) {
 	// Always return -1 as there's no ID here.
 	dummyID := types.JSONRPCIntID(-1) // URIClientRequestID
 
 	// Exception for websocket endpoints
 	if rpcFunc.ws {
-		return func(w http.ResponseWriter, r *http.Request) {
+		return func(w http.ResponseWriter, _ *http.Request) {
 			res := types.RPCMethodNotFoundError(dummyID)
 			if wErr := WriteRPCResponseHTTPError(w, http.StatusNotFound, res); wErr != nil {
 				logger.Error("failed to write response", "err", wErr)
@@ -34,7 +34,13 @@ func makeHTTPHandler(rpcFunc *RPCFunc, logger log.Logger) func(http.ResponseWrit
 
 	// All other endpoints
 	return func(w http.ResponseWriter, r *http.Request) {
-		logger.Debug("HTTP HANDLER", "req", r)
+		logger.Debug("HTTP HANDLER", "req", map[string]any{
+			"method":   r.Method,
+			"url":      r.URL.String(),
+			"header":   r.Header,
+			"ip":       r.RemoteAddr,
+			"postForm": r.PostForm,
+		})
 
 		ctx := &types.Context{HTTPReq: r}
 		args := []reflect.Value{reflect.ValueOf(ctx)}
@@ -53,8 +59,12 @@ func makeHTTPHandler(rpcFunc *RPCFunc, logger log.Logger) func(http.ResponseWrit
 
 		returns := rpcFunc.f.Call(args)
 
-		logger.Debug("HTTPRestRPC", "method", r.URL.Path, "args", args, "returns", returns)
+		logArgs := make([]any, 0, len(fnArgs))
+		for _, arg := range fnArgs {
+			logArgs = append(logArgs, arg.Interface())
+		}
 		result, err := unreflectResult(returns)
+		logger.Debug("HTTPRestRPC", "method", r.URL.Path, "args", logArgs, "result", result, "error", err)
 		if err != nil {
 			if err := WriteRPCResponseHTTPError(w, http.StatusInternalServerError,
 				types.RPCInternalError(dummyID, err)); err != nil {
@@ -77,7 +87,7 @@ func makeHTTPHandler(rpcFunc *RPCFunc, logger log.Logger) func(http.ResponseWrit
 	}
 }
 
-// Covert an http query to a list of properly typed values.
+// Convert an http query to a list of properly typed values.
 // To be properly decoded the arg must be a concrete type from CometBFT (if its an interface).
 func httpParamsToArgs(rpcFunc *RPCFunc, r *http.Request) ([]reflect.Value, error) {
 	// skip types.Context
@@ -128,24 +138,19 @@ func jsonStringToArg(rt reflect.Type, arg string) (reflect.Value, error) {
 func nonJSONStringToArg(rt reflect.Type, arg string) (reflect.Value, bool, error) {
 	if rt.Kind() == reflect.Ptr {
 		rv1, ok, err := nonJSONStringToArg(rt.Elem(), arg)
-		switch {
-		case err != nil:
-			return reflect.Value{}, false, err
-		case ok:
-			rv := reflect.New(rt.Elem())
-			rv.Elem().Set(rv1)
-			return rv, true, nil
-		default:
-			return reflect.Value{}, false, nil
+		if err != nil || !ok {
+			return reflect.Value{}, ok, err
 		}
-	} else {
-		return _nonJSONStringToArg(rt, arg)
+		rv := reflect.New(rt.Elem())
+		rv.Elem().Set(rv1)
+		return rv, true, nil
 	}
+	return _nonJSONStringToArg(rt, arg)
 }
 
 // NOTE: rt.Kind() isn't a pointer.
 func _nonJSONStringToArg(rt reflect.Type, arg string) (reflect.Value, bool, error) {
-	isIntString := reInt.Match([]byte(arg))
+	isIntString := reInt.MatchString(arg)
 	isQuotedString := strings.HasPrefix(arg, `"`) && strings.HasSuffix(arg, `"`)
 	isHexString := strings.HasPrefix(strings.ToLower(arg), "0x")
 

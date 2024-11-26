@@ -14,25 +14,29 @@ type Application struct {
 	mock.Mock
 }
 
-// ApplySnapshotChunk provides a mock function with given fields: _a0, _a1
-func (_m *Application) ApplySnapshotChunk(_a0 context.Context, _a1 *types.RequestApplySnapshotChunk) (*types.ResponseApplySnapshotChunk, error) {
-	ret := _m.Called(_a0, _a1)
+// ApplySnapshotChunk provides a mock function with given fields: ctx, req
+func (_m *Application) ApplySnapshotChunk(ctx context.Context, req *types.ApplySnapshotChunkRequest) (*types.ApplySnapshotChunkResponse, error) {
+	ret := _m.Called(ctx, req)
 
-	var r0 *types.ResponseApplySnapshotChunk
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *types.RequestApplySnapshotChunk) (*types.ResponseApplySnapshotChunk, error)); ok {
-		return rf(_a0, _a1)
+	if len(ret) == 0 {
+		panic("no return value specified for ApplySnapshotChunk")
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *types.RequestApplySnapshotChunk) *types.ResponseApplySnapshotChunk); ok {
-		r0 = rf(_a0, _a1)
+
+	var r0 *types.ApplySnapshotChunkResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *types.ApplySnapshotChunkRequest) (*types.ApplySnapshotChunkResponse, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *types.ApplySnapshotChunkRequest) *types.ApplySnapshotChunkResponse); ok {
+		r0 = rf(ctx, req)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*types.ResponseApplySnapshotChunk)
+			r0 = ret.Get(0).(*types.ApplySnapshotChunkResponse)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *types.RequestApplySnapshotChunk) error); ok {
-		r1 = rf(_a0, _a1)
+	if rf, ok := ret.Get(1).(func(context.Context, *types.ApplySnapshotChunkRequest) error); ok {
+		r1 = rf(ctx, req)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -40,25 +44,29 @@ func (_m *Application) ApplySnapshotChunk(_a0 context.Context, _a1 *types.Reques
 	return r0, r1
 }
 
-// CheckTx provides a mock function with given fields: _a0, _a1
-func (_m *Application) CheckTx(_a0 context.Context, _a1 *types.RequestCheckTx) (*types.ResponseCheckTx, error) {
-	ret := _m.Called(_a0, _a1)
+// CheckTx provides a mock function with given fields: ctx, req
+func (_m *Application) CheckTx(ctx context.Context, req *types.CheckTxRequest) (*types.CheckTxResponse, error) {
+	ret := _m.Called(ctx, req)
 
-	var r0 *types.ResponseCheckTx
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *types.RequestCheckTx) (*types.ResponseCheckTx, error)); ok {
-		return rf(_a0, _a1)
+	if len(ret) == 0 {
+		panic("no return value specified for CheckTx")
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *types.RequestCheckTx) *types.ResponseCheckTx); ok {
-		r0 = rf(_a0, _a1)
+
+	var r0 *types.CheckTxResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *types.CheckTxRequest) (*types.CheckTxResponse, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *types.CheckTxRequest) *types.CheckTxResponse); ok {
+		r0 = rf(ctx, req)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*types.ResponseCheckTx)
+			r0 = ret.Get(0).(*types.CheckTxResponse)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *types.RequestCheckTx) error); ok {
-		r1 = rf(_a0, _a1)
+	if rf, ok := ret.Get(1).(func(context.Context, *types.CheckTxRequest) error); ok {
+		r1 = rf(ctx, req)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -66,25 +74,29 @@ func (_m *Application) CheckTx(_a0 context.Context, _a1 *types.RequestCheckTx) (
 	return r0, r1
 }
 
-// Commit provides a mock function with given fields: _a0, _a1
-func (_m *Application) Commit(_a0 context.Context, _a1 *types.RequestCommit) (*types.ResponseCommit, error) {
-	ret := _m.Called(_a0, _a1)
+// Commit provides a mock function with given fields: ctx, req
+func (_m *Application) Commit(ctx context.Context, req *types.CommitRequest) (*types.CommitResponse, error) {
+	ret := _m.Called(ctx, req)
 
-	var r0 *types.ResponseCommit
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *types.RequestCommit) (*types.ResponseCommit, error)); ok {
-		return rf(_a0, _a1)
+	if len(ret) == 0 {
+		panic("no return value specified for Commit")
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *types.RequestCommit) *types.ResponseCommit); ok {
-		r0 = rf(_a0, _a1)
+
+	var r0 *types.CommitResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *types.CommitRequest) (*types.CommitResponse, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *types.CommitRequest) *types.CommitResponse); ok {
+		r0 = rf(ctx, req)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*types.ResponseCommit)
+			r0 = ret.Get(0).(*types.CommitResponse)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *types.RequestCommit) error); ok {
-		r1 = rf(_a0, _a1)
+	if rf, ok := ret.Get(1).(func(context.Context, *types.CommitRequest) error); ok {
+		r1 = rf(ctx, req)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -92,25 +104,29 @@ func (_m *Application) Commit(_a0 context.Context, _a1 *types.RequestCommit) (*t
 	return r0, r1
 }
 
-// ExtendVote provides a mock function with given fields: _a0, _a1
-func (_m *Application) ExtendVote(_a0 context.Context, _a1 *types.RequestExtendVote) (*types.ResponseExtendVote, error) {
-	ret := _m.Called(_a0, _a1)
+// ExtendVote provides a mock function with given fields: ctx, req
+func (_m *Application) ExtendVote(ctx context.Context, req *types.ExtendVoteRequest) (*types.ExtendVoteResponse, error) {
+	ret := _m.Called(ctx, req)
 
-	var r0 *types.ResponseExtendVote
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *types.RequestExtendVote) (*types.ResponseExtendVote, error)); ok {
-		return rf(_a0, _a1)
+	if len(ret) == 0 {
+		panic("no return value specified for ExtendVote")
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *types.RequestExtendVote) *types.ResponseExtendVote); ok {
-		r0 = rf(_a0, _a1)
+
+	var r0 *types.ExtendVoteResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *types.ExtendVoteRequest) (*types.ExtendVoteResponse, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *types.ExtendVoteRequest) *types.ExtendVoteResponse); ok {
+		r0 = rf(ctx, req)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*types.ResponseExtendVote)
+			r0 = ret.Get(0).(*types.ExtendVoteResponse)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *types.RequestExtendVote) error); ok {
-		r1 = rf(_a0, _a1)
+	if rf, ok := ret.Get(1).(func(context.Context, *types.ExtendVoteRequest) error); ok {
+		r1 = rf(ctx, req)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -118,25 +134,29 @@ func (_m *Application) ExtendVote(_a0 context.Context, _a1 *types.RequestExtendV
 	return r0, r1
 }
 
-// FinalizeBlock provides a mock function with given fields: _a0, _a1
-func (_m *Application) FinalizeBlock(_a0 context.Context, _a1 *types.RequestFinalizeBlock) (*types.ResponseFinalizeBlock, error) {
-	ret := _m.Called(_a0, _a1)
+// FinalizeBlock provides a mock function with given fields: ctx, req
+func (_m *Application) FinalizeBlock(ctx context.Context, req *types.FinalizeBlockRequest) (*types.FinalizeBlockResponse, error) {
+	ret := _m.Called(ctx, req)
 
-	var r0 *types.ResponseFinalizeBlock
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *types.RequestFinalizeBlock) (*types.ResponseFinalizeBlock, error)); ok {
-		return rf(_a0, _a1)
+	if len(ret) == 0 {
+		panic("no return value specified for FinalizeBlock")
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *types.RequestFinalizeBlock) *types.ResponseFinalizeBlock); ok {
-		r0 = rf(_a0, _a1)
+
+	var r0 *types.FinalizeBlockResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *types.FinalizeBlockRequest) (*types.FinalizeBlockResponse, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *types.FinalizeBlockRequest) *types.FinalizeBlockResponse); ok {
+		r0 = rf(ctx, req)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*types.ResponseFinalizeBlock)
+			r0 = ret.Get(0).(*types.FinalizeBlockResponse)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *types.RequestFinalizeBlock) error); ok {
-		r1 = rf(_a0, _a1)
+	if rf, ok := ret.Get(1).(func(context.Context, *types.FinalizeBlockRequest) error); ok {
+		r1 = rf(ctx, req)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -144,25 +164,29 @@ func (_m *Application) FinalizeBlock(_a0 context.Context, _a1 *types.RequestFina
 	return r0, r1
 }
 
-// Info provides a mock function with given fields: _a0, _a1
-func (_m *Application) Info(_a0 context.Context, _a1 *types.RequestInfo) (*types.ResponseInfo, error) {
-	ret := _m.Called(_a0, _a1)
+// Info provides a mock function with given fields: ctx, req
+func (_m *Application) Info(ctx context.Context, req *types.InfoRequest) (*types.InfoResponse, error) {
+	ret := _m.Called(ctx, req)
 
-	var r0 *types.ResponseInfo
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *types.RequestInfo) (*types.ResponseInfo, error)); ok {
-		return rf(_a0, _a1)
+	if len(ret) == 0 {
+		panic("no return value specified for Info")
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *types.RequestInfo) *types.ResponseInfo); ok {
-		r0 = rf(_a0, _a1)
+
+	var r0 *types.InfoResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *types.InfoRequest) (*types.InfoResponse, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *types.InfoRequest) *types.InfoResponse); ok {
+		r0 = rf(ctx, req)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*types.ResponseInfo)
+			r0 = ret.Get(0).(*types.InfoResponse)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *types.RequestInfo) error); ok {
-		r1 = rf(_a0, _a1)
+	if rf, ok := ret.Get(1).(func(context.Context, *types.InfoRequest) error); ok {
+		r1 = rf(ctx, req)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -170,25 +194,29 @@ func (_m *Application) Info(_a0 context.Context, _a1 *types.RequestInfo) (*types
 	return r0, r1
 }
 
-// InitChain provides a mock function with given fields: _a0, _a1
-func (_m *Application) InitChain(_a0 context.Context, _a1 *types.RequestInitChain) (*types.ResponseInitChain, error) {
-	ret := _m.Called(_a0, _a1)
+// InitChain provides a mock function with given fields: ctx, req
+func (_m *Application) InitChain(ctx context.Context, req *types.InitChainRequest) (*types.InitChainResponse, error) {
+	ret := _m.Called(ctx, req)
 
-	var r0 *types.ResponseInitChain
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *types.RequestInitChain) (*types.ResponseInitChain, error)); ok {
-		return rf(_a0, _a1)
+	if len(ret) == 0 {
+		panic("no return value specified for InitChain")
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *types.RequestInitChain) *types.ResponseInitChain); ok {
-		r0 = rf(_a0, _a1)
+
+	var r0 *types.InitChainResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *types.InitChainRequest) (*types.InitChainResponse, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *types.InitChainRequest) *types.InitChainResponse); ok {
+		r0 = rf(ctx, req)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*types.ResponseInitChain)
+			r0 = ret.Get(0).(*types.InitChainResponse)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *types.RequestInitChain) error); ok {
-		r1 = rf(_a0, _a1)
+	if rf, ok := ret.Get(1).(func(context.Context, *types.InitChainRequest) error); ok {
+		r1 = rf(ctx, req)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -196,25 +224,29 @@ func (_m *Application) InitChain(_a0 context.Context, _a1 *types.RequestInitChai
 	return r0, r1
 }
 
-// ListSnapshots provides a mock function with given fields: _a0, _a1
-func (_m *Application) ListSnapshots(_a0 context.Context, _a1 *types.RequestListSnapshots) (*types.ResponseListSnapshots, error) {
-	ret := _m.Called(_a0, _a1)
+// ListSnapshots provides a mock function with given fields: ctx, req
+func (_m *Application) ListSnapshots(ctx context.Context, req *types.ListSnapshotsRequest) (*types.ListSnapshotsResponse, error) {
+	ret := _m.Called(ctx, req)
 
-	var r0 *types.ResponseListSnapshots
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *types.RequestListSnapshots) (*types.ResponseListSnapshots, error)); ok {
-		return rf(_a0, _a1)
+	if len(ret) == 0 {
+		panic("no return value specified for ListSnapshots")
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *types.RequestListSnapshots) *types.ResponseListSnapshots); ok {
-		r0 = rf(_a0, _a1)
+
+	var r0 *types.ListSnapshotsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *types.ListSnapshotsRequest) (*types.ListSnapshotsResponse, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *types.ListSnapshotsRequest) *types.ListSnapshotsResponse); ok {
+		r0 = rf(ctx, req)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*types.ResponseListSnapshots)
+			r0 = ret.Get(0).(*types.ListSnapshotsResponse)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *types.RequestListSnapshots) error); ok {
-		r1 = rf(_a0, _a1)
+	if rf, ok := ret.Get(1).(func(context.Context, *types.ListSnapshotsRequest) error); ok {
+		r1 = rf(ctx, req)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -222,25 +254,29 @@ func (_m *Application) ListSnapshots(_a0 context.Context, _a1 *types.RequestList
 	return r0, r1
 }
 
-// LoadSnapshotChunk provides a mock function with given fields: _a0, _a1
-func (_m *Application) LoadSnapshotChunk(_a0 context.Context, _a1 *types.RequestLoadSnapshotChunk) (*types.ResponseLoadSnapshotChunk, error) {
-	ret := _m.Called(_a0, _a1)
+// LoadSnapshotChunk provides a mock function with given fields: ctx, req
+func (_m *Application) LoadSnapshotChunk(ctx context.Context, req *types.LoadSnapshotChunkRequest) (*types.LoadSnapshotChunkResponse, error) {
+	ret := _m.Called(ctx, req)
 
-	var r0 *types.ResponseLoadSnapshotChunk
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *types.RequestLoadSnapshotChunk) (*types.ResponseLoadSnapshotChunk, error)); ok {
-		return rf(_a0, _a1)
+	if len(ret) == 0 {
+		panic("no return value specified for LoadSnapshotChunk")
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *types.RequestLoadSnapshotChunk) *types.ResponseLoadSnapshotChunk); ok {
-		r0 = rf(_a0, _a1)
+
+	var r0 *types.LoadSnapshotChunkResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *types.LoadSnapshotChunkRequest) (*types.LoadSnapshotChunkResponse, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *types.LoadSnapshotChunkRequest) *types.LoadSnapshotChunkResponse); ok {
+		r0 = rf(ctx, req)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*types.ResponseLoadSnapshotChunk)
+			r0 = ret.Get(0).(*types.LoadSnapshotChunkResponse)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *types.RequestLoadSnapshotChunk) error); ok {
-		r1 = rf(_a0, _a1)
+	if rf, ok := ret.Get(1).(func(context.Context, *types.LoadSnapshotChunkRequest) error); ok {
+		r1 = rf(ctx, req)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -248,25 +284,29 @@ func (_m *Application) LoadSnapshotChunk(_a0 context.Context, _a1 *types.Request
 	return r0, r1
 }
 
-// OfferSnapshot provides a mock function with given fields: _a0, _a1
-func (_m *Application) OfferSnapshot(_a0 context.Context, _a1 *types.RequestOfferSnapshot) (*types.ResponseOfferSnapshot, error) {
-	ret := _m.Called(_a0, _a1)
+// OfferSnapshot provides a mock function with given fields: ctx, req
+func (_m *Application) OfferSnapshot(ctx context.Context, req *types.OfferSnapshotRequest) (*types.OfferSnapshotResponse, error) {
+	ret := _m.Called(ctx, req)
 
-	var r0 *types.ResponseOfferSnapshot
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *types.RequestOfferSnapshot) (*types.ResponseOfferSnapshot, error)); ok {
-		return rf(_a0, _a1)
+	if len(ret) == 0 {
+		panic("no return value specified for OfferSnapshot")
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *types.RequestOfferSnapshot) *types.ResponseOfferSnapshot); ok {
-		r0 = rf(_a0, _a1)
+
+	var r0 *types.OfferSnapshotResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *types.OfferSnapshotRequest) (*types.OfferSnapshotResponse, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *types.OfferSnapshotRequest) *types.OfferSnapshotResponse); ok {
+		r0 = rf(ctx, req)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*types.ResponseOfferSnapshot)
+			r0 = ret.Get(0).(*types.OfferSnapshotResponse)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *types.RequestOfferSnapshot) error); ok {
-		r1 = rf(_a0, _a1)
+	if rf, ok := ret.Get(1).(func(context.Context, *types.OfferSnapshotRequest) error); ok {
+		r1 = rf(ctx, req)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -274,25 +314,29 @@ func (_m *Application) OfferSnapshot(_a0 context.Context, _a1 *types.RequestOffe
 	return r0, r1
 }
 
-// PrepareProposal provides a mock function with given fields: _a0, _a1
-func (_m *Application) PrepareProposal(_a0 context.Context, _a1 *types.RequestPrepareProposal) (*types.ResponsePrepareProposal, error) {
-	ret := _m.Called(_a0, _a1)
+// PrepareProposal provides a mock function with given fields: ctx, req
+func (_m *Application) PrepareProposal(ctx context.Context, req *types.PrepareProposalRequest) (*types.PrepareProposalResponse, error) {
+	ret := _m.Called(ctx, req)
 
-	var r0 *types.ResponsePrepareProposal
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *types.RequestPrepareProposal) (*types.ResponsePrepareProposal, error)); ok {
-		return rf(_a0, _a1)
+	if len(ret) == 0 {
+		panic("no return value specified for PrepareProposal")
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *types.RequestPrepareProposal) *types.ResponsePrepareProposal); ok {
-		r0 = rf(_a0, _a1)
+
+	var r0 *types.PrepareProposalResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *types.PrepareProposalRequest) (*types.PrepareProposalResponse, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *types.PrepareProposalRequest) *types.PrepareProposalResponse); ok {
+		r0 = rf(ctx, req)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*types.ResponsePrepareProposal)
+			r0 = ret.Get(0).(*types.PrepareProposalResponse)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *types.RequestPrepareProposal) error); ok {
-		r1 = rf(_a0, _a1)
+	if rf, ok := ret.Get(1).(func(context.Context, *types.PrepareProposalRequest) error); ok {
+		r1 = rf(ctx, req)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -300,25 +344,29 @@ func (_m *Application) PrepareProposal(_a0 context.Context, _a1 *types.RequestPr
 	return r0, r1
 }
 
-// ProcessProposal provides a mock function with given fields: _a0, _a1
-func (_m *Application) ProcessProposal(_a0 context.Context, _a1 *types.RequestProcessProposal) (*types.ResponseProcessProposal, error) {
-	ret := _m.Called(_a0, _a1)
+// ProcessProposal provides a mock function with given fields: ctx, req
+func (_m *Application) ProcessProposal(ctx context.Context, req *types.ProcessProposalRequest) (*types.ProcessProposalResponse, error) {
+	ret := _m.Called(ctx, req)
 
-	var r0 *types.ResponseProcessProposal
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *types.RequestProcessProposal) (*types.ResponseProcessProposal, error)); ok {
-		return rf(_a0, _a1)
+	if len(ret) == 0 {
+		panic("no return value specified for ProcessProposal")
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *types.RequestProcessProposal) *types.ResponseProcessProposal); ok {
-		r0 = rf(_a0, _a1)
+
+	var r0 *types.ProcessProposalResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *types.ProcessProposalRequest) (*types.ProcessProposalResponse, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *types.ProcessProposalRequest) *types.ProcessProposalResponse); ok {
+		r0 = rf(ctx, req)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*types.ResponseProcessProposal)
+			r0 = ret.Get(0).(*types.ProcessProposalResponse)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *types.RequestProcessProposal) error); ok {
-		r1 = rf(_a0, _a1)
+	if rf, ok := ret.Get(1).(func(context.Context, *types.ProcessProposalRequest) error); ok {
+		r1 = rf(ctx, req)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -326,25 +374,29 @@ func (_m *Application) ProcessProposal(_a0 context.Context, _a1 *types.RequestPr
 	return r0, r1
 }
 
-// Query provides a mock function with given fields: _a0, _a1
-func (_m *Application) Query(_a0 context.Context, _a1 *types.RequestQuery) (*types.ResponseQuery, error) {
-	ret := _m.Called(_a0, _a1)
+// Query provides a mock function with given fields: ctx, req
+func (_m *Application) Query(ctx context.Context, req *types.QueryRequest) (*types.QueryResponse, error) {
+	ret := _m.Called(ctx, req)
 
-	var r0 *types.ResponseQuery
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *types.RequestQuery) (*types.ResponseQuery, error)); ok {
-		return rf(_a0, _a1)
+	if len(ret) == 0 {
+		panic("no return value specified for Query")
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *types.RequestQuery) *types.ResponseQuery); ok {
-		r0 = rf(_a0, _a1)
+
+	var r0 *types.QueryResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *types.QueryRequest) (*types.QueryResponse, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *types.QueryRequest) *types.QueryResponse); ok {
+		r0 = rf(ctx, req)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*types.ResponseQuery)
+			r0 = ret.Get(0).(*types.QueryResponse)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *types.RequestQuery) error); ok {
-		r1 = rf(_a0, _a1)
+	if rf, ok := ret.Get(1).(func(context.Context, *types.QueryRequest) error); ok {
+		r1 = rf(ctx, req)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -352,25 +404,29 @@ func (_m *Application) Query(_a0 context.Context, _a1 *types.RequestQuery) (*typ
 	return r0, r1
 }
 
-// VerifyVoteExtension provides a mock function with given fields: _a0, _a1
-func (_m *Application) VerifyVoteExtension(_a0 context.Context, _a1 *types.RequestVerifyVoteExtension) (*types.ResponseVerifyVoteExtension, error) {
-	ret := _m.Called(_a0, _a1)
+// VerifyVoteExtension provides a mock function with given fields: ctx, req
+func (_m *Application) VerifyVoteExtension(ctx context.Context, req *types.VerifyVoteExtensionRequest) (*types.VerifyVoteExtensionResponse, error) {
+	ret := _m.Called(ctx, req)
 
-	var r0 *types.ResponseVerifyVoteExtension
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *types.RequestVerifyVoteExtension) (*types.ResponseVerifyVoteExtension, error)); ok {
-		return rf(_a0, _a1)
+	if len(ret) == 0 {
+		panic("no return value specified for VerifyVoteExtension")
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *types.RequestVerifyVoteExtension) *types.ResponseVerifyVoteExtension); ok {
-		r0 = rf(_a0, _a1)
+
+	var r0 *types.VerifyVoteExtensionResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *types.VerifyVoteExtensionRequest) (*types.VerifyVoteExtensionResponse, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *types.VerifyVoteExtensionRequest) *types.VerifyVoteExtensionResponse); ok {
+		r0 = rf(ctx, req)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*types.ResponseVerifyVoteExtension)
+			r0 = ret.Get(0).(*types.VerifyVoteExtensionResponse)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *types.RequestVerifyVoteExtension) error); ok {
-		r1 = rf(_a0, _a1)
+	if rf, ok := ret.Get(1).(func(context.Context, *types.VerifyVoteExtensionRequest) error); ok {
+		r1 = rf(ctx, req)
 	} else {
 		r1 = ret.Error(1)
 	}

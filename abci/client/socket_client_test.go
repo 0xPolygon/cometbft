@@ -9,13 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	abcicli "github.com/cometbft/cometbft/abci/client"
 	"github.com/cometbft/cometbft/abci/server"
 	"github.com/cometbft/cometbft/abci/types"
-	cmtrand "github.com/cometbft/cometbft/libs/rand"
+	cmtrand "github.com/cometbft/cometbft/internal/rand"
 	"github.com/cometbft/cometbft/libs/service"
 )
 
@@ -39,7 +38,7 @@ func TestCalls(t *testing.T) {
 		require.Fail(t, "No response arrived")
 	case err, ok := <-resp:
 		require.True(t, ok, "Must not close channel")
-		assert.NoError(t, err, "This should return success")
+		require.NoError(t, err)
 	}
 }
 
@@ -51,7 +50,9 @@ func TestHangingAsyncCalls(t *testing.T) {
 	resp := make(chan error, 1)
 	go func() {
 		// Call CheckTx
-		reqres, err := c.CheckTxAsync(context.Background(), &types.RequestCheckTx{})
+		reqres, err := c.CheckTxAsync(context.Background(), &types.CheckTxRequest{
+			Type: types.CHECK_TX_TYPE_CHECK,
+		})
 		require.NoError(t, err)
 		// wait 50 ms for all events to travel socket, but
 		// no response yet from server
@@ -70,7 +71,7 @@ func TestHangingAsyncCalls(t *testing.T) {
 		require.Fail(t, "No response arrived")
 	case err, ok := <-resp:
 		require.True(t, ok, "Must not close channel")
-		assert.Error(t, err, "We should get EOF error")
+		require.Error(t, err, "We should get EOF error")
 	}
 }
 
@@ -104,14 +105,14 @@ func TestBulk(t *testing.T) {
 	require.NoError(t, err)
 
 	// Construct request
-	rfb := &types.RequestFinalizeBlock{Txs: make([][]byte, numTxs)}
+	rfb := &types.FinalizeBlockRequest{Txs: make([][]byte, numTxs)}
 	for counter := 0; counter < numTxs; counter++ {
 		rfb.Txs[counter] = []byte("test")
 	}
 	// Send bulk request
 	res, err := client.FinalizeBlock(context.Background(), rfb)
 	require.NoError(t, err)
-	require.Equal(t, numTxs, len(res.TxResults), "Number of txs doesn't match")
+	require.Len(t, res.TxResults, numTxs, "Number of txs doesn't match")
 	for _, tx := range res.TxResults {
 		require.Equal(t, uint32(0), tx.Code, "Tx failed")
 	}
@@ -157,12 +158,12 @@ type slowApp struct {
 	types.BaseApplication
 }
 
-func (slowApp) CheckTx(context.Context, *types.RequestCheckTx) (*types.ResponseCheckTx, error) {
+func (slowApp) CheckTx(context.Context, *types.CheckTxRequest) (*types.CheckTxResponse, error) {
 	time.Sleep(time.Second)
-	return &types.ResponseCheckTx{}, nil
+	return &types.CheckTxResponse{}, nil
 }
 
-// TestCallbackInvokedWhenSetLaet ensures that the callback is invoked when
+// TestCallbackInvokedWhenSetLate ensures that the callback is invoked when
 // set after the client completes the call into the app. Currently this
 // test relies on the callback being allowed to be invoked twice if set multiple
 // times, once when set early and once when set late.
@@ -176,20 +177,24 @@ func TestCallbackInvokedWhenSetLate(t *testing.T) {
 		wg: wg,
 	}
 	_, c := setupClientServer(t, app)
-	reqRes, err := c.CheckTxAsync(ctx, &types.RequestCheckTx{})
+	reqRes, err := c.CheckTxAsync(ctx, &types.CheckTxRequest{
+		Type: types.CHECK_TX_TYPE_CHECK,
+	})
 	require.NoError(t, err)
 
 	done := make(chan struct{})
-	cb := func(_ *types.Response) {
+	cb := func(_ *types.Response) error {
 		close(done)
+		return nil
 	}
 	reqRes.SetCallback(cb)
 	app.wg.Done()
 	<-done
 
 	var called bool
-	cb = func(_ *types.Response) {
+	cb = func(_ *types.Response) error {
 		called = true
+		return nil
 	}
 	reqRes.SetCallback(cb)
 	require.True(t, called)
@@ -200,7 +205,7 @@ type blockedABCIApplication struct {
 	types.BaseApplication
 }
 
-func (b blockedABCIApplication) CheckTxAsync(ctx context.Context, r *types.RequestCheckTx) (*types.ResponseCheckTx, error) {
+func (b blockedABCIApplication) CheckTxAsync(ctx context.Context, r *types.CheckTxRequest) (*types.CheckTxResponse, error) {
 	b.wg.Wait()
 	return b.BaseApplication.CheckTx(ctx, r)
 }
@@ -217,12 +222,15 @@ func TestCallbackInvokedWhenSetEarly(t *testing.T) {
 		wg: wg,
 	}
 	_, c := setupClientServer(t, app)
-	reqRes, err := c.CheckTxAsync(ctx, &types.RequestCheckTx{})
+	reqRes, err := c.CheckTxAsync(ctx, &types.CheckTxRequest{
+		Type: types.CHECK_TX_TYPE_CHECK,
+	})
 	require.NoError(t, err)
 
 	done := make(chan struct{})
-	cb := func(_ *types.Response) {
+	cb := func(_ *types.Response) error {
 		close(done)
+		return nil
 	}
 	reqRes.SetCallback(cb)
 	app.wg.Done()

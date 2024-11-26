@@ -1,7 +1,7 @@
 package proxy
 
 import (
-	"fmt"
+	"time"
 
 	abcicli "github.com/cometbft/cometbft/abci/client"
 	"github.com/cometbft/cometbft/abci/example/kvstore"
@@ -28,7 +28,7 @@ type ClientCreator interface {
 	NewABCISnapshotClient() (abcicli.Client, error)
 }
 
-//----------------------------------------------------
+// ----------------------------------------------------
 // local proxy uses a mutex on an in-proc app
 
 type localClientCreator struct {
@@ -71,7 +71,7 @@ func (l *localClientCreator) newABCIClient() (abcicli.Client, error) {
 	return abcicli.NewLocalClient(l.mtx, l.app), nil
 }
 
-//-------------------------------------------------------------------------
+// -------------------------------------------------------------------------
 // connection-synchronized local client uses a mutex per "connection" on an
 // in-process app
 
@@ -116,7 +116,7 @@ func (c *connSyncLocalClientCreator) newABCIClient() (abcicli.Client, error) {
 	return abcicli.NewLocalClient(nil, c.app), nil
 }
 
-//-----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // advanced local client creator with a more complex concurrency model than the
 // other local client creators
 
@@ -166,7 +166,7 @@ func (c *consensusSyncLocalClientCreator) NewABCISnapshotClient() (abcicli.Clien
 	return abcicli.NewUnsyncLocalClient(c.app), nil
 }
 
-//-----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // most advanced local client creator with a more complex concurrency model
 // than the other local client creators - all concurrency is assumed to be
 // handled by the application
@@ -206,7 +206,7 @@ func (c *unsyncLocalClientCreator) NewABCISnapshotClient() (abcicli.Client, erro
 	return abcicli.NewUnsyncLocalClient(c.app), nil
 }
 
-//---------------------------------------------------------------
+// ---------------------------------------------------------------
 // remote proxy opens new connections to an external app process
 
 type remoteClientCreator struct {
@@ -249,7 +249,7 @@ func (r *remoteClientCreator) NewABCISnapshotClient() (abcicli.Client, error) {
 func (r *remoteClientCreator) newABCIClient() (abcicli.Client, error) {
 	remoteApp, err := abcicli.NewClient(r.addr, r.transport, r.mustConnect)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to proxy: %w", err)
+		return nil, ErrUnreachableProxy{Err: err}
 	}
 
 	return remoteApp, nil
@@ -265,19 +265,37 @@ func (r *remoteClientCreator) newABCIClient() (abcicli.Client, error) {
 // "_connsync" variant (i.e. "kvstore_connsync", etc.), which attempts to
 // replicate the same concurrency model as the remote client.
 func DefaultClientCreator(addr, transport, dbDir string) ClientCreator {
+	// Default is zero for kvstore and persistent_kvstore.
+	// Replaces deprecated `timeout_commit` parameter.
+	// Set to 1s to mimic the real world app.
+	delay := 1 * time.Second
+
+	// Don't forget to change BaseConfig#ValidateBasic if you add new options here.
 	switch addr {
 	case "kvstore":
-		return NewLocalClientCreator(kvstore.NewInMemoryApplication())
+		app := kvstore.NewInMemoryApplication()
+		app.SetNextBlockDelay(delay)
+		return NewLocalClientCreator(app)
 	case "kvstore_connsync":
-		return NewConnSyncLocalClientCreator(kvstore.NewInMemoryApplication())
+		app := kvstore.NewInMemoryApplication()
+		app.SetNextBlockDelay(delay)
+		return NewConnSyncLocalClientCreator(app)
 	case "kvstore_unsync":
-		return NewUnsyncLocalClientCreator(kvstore.NewInMemoryApplication())
+		app := kvstore.NewInMemoryApplication()
+		app.SetNextBlockDelay(delay)
+		return NewUnsyncLocalClientCreator(app)
 	case "persistent_kvstore":
-		return NewLocalClientCreator(kvstore.NewPersistentApplication(dbDir))
+		app := kvstore.NewPersistentApplication(dbDir)
+		app.SetNextBlockDelay(delay)
+		return NewLocalClientCreator(app)
 	case "persistent_kvstore_connsync":
-		return NewConnSyncLocalClientCreator(kvstore.NewPersistentApplication(dbDir))
+		app := kvstore.NewPersistentApplication(dbDir)
+		app.SetNextBlockDelay(delay)
+		return NewConnSyncLocalClientCreator(app)
 	case "persistent_kvstore_unsync":
-		return NewUnsyncLocalClientCreator(kvstore.NewPersistentApplication(dbDir))
+		app := kvstore.NewPersistentApplication(dbDir)
+		app.SetNextBlockDelay(delay)
+		return NewUnsyncLocalClientCreator(app)
 	case "e2e":
 		app, err := e2e.NewApplication(e2e.DefaultConfig(dbDir))
 		if err != nil {

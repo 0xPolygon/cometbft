@@ -5,6 +5,10 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+	"golang.org/x/exp/slices"
 
 	db "github.com/cometbft/cometbft-db"
 	abci "github.com/cometbft/cometbft/abci/types"
@@ -13,15 +17,14 @@ import (
 	"github.com/cometbft/cometbft/libs/pubsub/query"
 	sm "github.com/cometbft/cometbft/state"
 	blockidxkv "github.com/cometbft/cometbft/state/indexer/block/kv"
+	"github.com/cometbft/cometbft/state/txindex"
 	"github.com/cometbft/cometbft/state/txindex/kv"
 	"github.com/cometbft/cometbft/store"
 	"github.com/cometbft/cometbft/types"
-	"github.com/stretchr/testify/require"
-	"golang.org/x/exp/slices"
 )
 
 func TestPruneBlockIndexerToRetainHeight(t *testing.T) {
-	pruner, _, blockIndexer, _ := createTestSetup(t)
+	pruner, _, blockIndexer := createTestSetup(t)
 
 	for height := int64(1); height <= 4; height++ {
 		events, _, _ := getEventsAndResults(height)
@@ -36,14 +39,14 @@ func TestPruneBlockIndexerToRetainHeight(t *testing.T) {
 
 	heights, err := blockIndexer.Search(context.Background(), query.MustCompile("block.height <= 2"))
 	require.NoError(t, err)
-	require.Equal(t, heights, []int64{1, 2})
+	require.Equal(t, []int64{1, 2}, heights)
 
 	newRetainHeight := pruner.PruneBlockIndexerToRetainHeight(0)
 	require.Equal(t, int64(2), newRetainHeight)
 
 	heights, err = blockIndexer.Search(context.Background(), query.MustCompile("block.height <= 2"))
 	require.NoError(t, err)
-	require.Equal(t, heights, []int64{2})
+	require.Equal(t, []int64{2}, heights)
 
 	err = pruner.SetBlockIndexerRetainHeight(int64(4))
 	require.NoError(t, err)
@@ -53,13 +56,13 @@ func TestPruneBlockIndexerToRetainHeight(t *testing.T) {
 
 	heights, err = blockIndexer.Search(context.Background(), query.MustCompile("block.height <= 4"))
 	require.NoError(t, err)
-	require.Equal(t, heights, []int64{2, 3, 4})
+	require.Equal(t, []int64{2, 3, 4}, heights)
 
 	pruner.PruneBlockIndexerToRetainHeight(2)
 
 	heights, err = blockIndexer.Search(context.Background(), query.MustCompile("block.height <= 4"))
 	require.NoError(t, err)
-	require.Equal(t, heights, []int64{4})
+	require.Equal(t, []int64{4}, heights)
 
 	events, _, _ := getEventsAndResults(1)
 
@@ -68,17 +71,17 @@ func TestPruneBlockIndexerToRetainHeight(t *testing.T) {
 
 	heights, err = blockIndexer.Search(context.Background(), query.MustCompile("block.height <= 4"))
 	require.NoError(t, err)
-	require.Equal(t, heights, []int64{1, 4})
+	require.Equal(t, []int64{1, 4}, heights)
 
 	pruner.PruneBlockIndexerToRetainHeight(4)
 
 	heights, err = blockIndexer.Search(context.Background(), query.MustCompile("block.height <= 4"))
 	require.NoError(t, err)
-	require.Equal(t, heights, []int64{1, 4})
+	require.Equal(t, []int64{1, 4}, heights)
 }
 
 func TestPruneTxIndexerToRetainHeight(t *testing.T) {
-	pruner, txIndexer, _, _ := createTestSetup(t)
+	pruner, txIndexer, _ := createTestSetup(t)
 
 	for height := int64(1); height <= 4; height++ {
 		_, txResult1, txResult2 := getEventsAndResults(height)
@@ -94,16 +97,16 @@ func TestPruneTxIndexerToRetainHeight(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(2), actual)
 
-	results, err := txIndexer.Search(context.Background(), query.MustCompile("tx.height < 2"))
+	results, _, err := txIndexer.Search(context.Background(), query.MustCompile("tx.height < 2"), txindex.Pagination{})
 	require.NoError(t, err)
 	require.True(t, containsAllTxs(results, []string{"foo1", "bar1"}))
 
 	newRetainHeight := pruner.PruneTxIndexerToRetainHeight(0)
 	require.Equal(t, int64(2), newRetainHeight)
 
-	results, err = txIndexer.Search(context.Background(), query.MustCompile("tx.height < 2"))
+	results, _, err = txIndexer.Search(context.Background(), query.MustCompile("tx.height < 2"), txindex.Pagination{})
 	require.NoError(t, err)
-	require.Equal(t, 0, len(results))
+	require.Empty(t, results)
 
 	err = pruner.SetTxIndexerRetainHeight(int64(4))
 	require.NoError(t, err)
@@ -111,15 +114,15 @@ func TestPruneTxIndexerToRetainHeight(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(4), actual)
 
-	results, err = txIndexer.Search(context.Background(), query.MustCompile("tx.height < 4"))
+	results, _, err = txIndexer.Search(context.Background(), query.MustCompile("tx.height < 4"), txindex.Pagination{})
 	require.NoError(t, err)
 	require.True(t, containsAllTxs(results, []string{"foo2", "bar2", "foo3", "bar3"}))
 
 	pruner.PruneTxIndexerToRetainHeight(2)
 
-	results, err = txIndexer.Search(context.Background(), query.MustCompile("tx.height < 4"))
+	results, _, err = txIndexer.Search(context.Background(), query.MustCompile("tx.height < 4"), txindex.Pagination{})
 	require.NoError(t, err)
-	require.Equal(t, 0, len(results))
+	require.Empty(t, results)
 
 	_, txResult1, txResult2 := getEventsAndResults(1)
 	err = txIndexer.Index(txResult1)
@@ -127,13 +130,13 @@ func TestPruneTxIndexerToRetainHeight(t *testing.T) {
 	err = txIndexer.Index(txResult2)
 	require.NoError(t, err)
 
-	results, err = txIndexer.Search(context.Background(), query.MustCompile("tx.height <= 4"))
+	results, _, err = txIndexer.Search(context.Background(), query.MustCompile("tx.height <= 4"), txindex.Pagination{})
 	require.NoError(t, err)
 	require.True(t, containsAllTxs(results, []string{"foo1", "bar1", "foo4", "bar4"}))
 
 	pruner.PruneTxIndexerToRetainHeight(4)
 
-	results, err = txIndexer.Search(context.Background(), query.MustCompile("tx.height <= 4"))
+	results, _, err = txIndexer.Search(context.Background(), query.MustCompile("tx.height <= 4"), txindex.Pagination{})
 	require.NoError(t, err)
 	require.True(t, containsAllTxs(results, []string{"foo1", "bar1", "foo4", "bar4"}))
 }
@@ -149,7 +152,8 @@ func containsAllTxs(results []*abci.TxResult, txs []string) bool {
 	return true
 }
 
-func createTestSetup(t *testing.T) (*sm.Pruner, *kv.TxIndex, blockidxkv.BlockerIndexer, *types.EventBus) {
+func createTestSetup(t *testing.T) (*sm.Pruner, *kv.TxIndex, blockidxkv.BlockerIndexer) {
+	t.Helper()
 	config := test.ResetTestRoot("pruner_test")
 	t.Cleanup(func() {
 		err := os.RemoveAll(config.RootDir)
@@ -186,7 +190,7 @@ func createTestSetup(t *testing.T) (*sm.Pruner, *kv.TxIndex, blockidxkv.BlockerI
 	bs := store.NewBlockStore(blockDB)
 	pruner := sm.NewPruner(stateStore, bs, blockIndexer, txIndexer, log.TestingLogger())
 
-	return pruner, txIndexer, *blockIndexer, eventBus
+	return pruner, txIndexer, *blockIndexer
 }
 
 func getEventsAndResults(height int64) (types.EventDataNewBlockEvents, *abci.TxResult, *abci.TxResult) {
@@ -219,4 +223,57 @@ func getEventsAndResults(height int64) (types.EventDataNewBlockEvents, *abci.TxR
 		Result: abci.ExecTxResult{Code: 0},
 	}
 	return events, txResult1, txResult2
+}
+
+// When trying to prune the only block in the store it should not succeed
+// State should also not be pruned.
+func TestPruningWithHeight1(t *testing.T) {
+	config := test.ResetTestRoot("blockchain_reactor_pruning_test")
+	defer os.RemoveAll(config.RootDir)
+	state, bs, txIndexer, blockIndexer, cleanup, stateStore := makeStateAndBlockStoreAndIndexers()
+	defer cleanup()
+	require.EqualValues(t, 0, bs.Base())
+	require.EqualValues(t, 0, bs.Height())
+	require.EqualValues(t, 0, bs.Size())
+
+	err := initStateStoreRetainHeights(stateStore)
+	require.NoError(t, err)
+
+	obs := newPrunerObserver(1)
+
+	pruner := sm.NewPruner(
+		stateStore,
+		bs,
+		blockIndexer,
+		txIndexer,
+		log.TestingLogger(),
+		sm.WithPrunerInterval(time.Second*1),
+		sm.WithPrunerObserver(obs),
+		sm.WithPrunerCompanionEnabled(),
+	)
+
+	err = pruner.SetApplicationBlockRetainHeight(1)
+	require.Error(t, err)
+	err = pruner.SetApplicationBlockRetainHeight(0)
+	require.NoError(t, err)
+
+	block := state.MakeBlock(1, test.MakeNTxs(1, 10), new(types.Commit), nil, state.Validators.GetProposer().Address)
+	partSet, err := block.MakePartSet(2)
+	require.NoError(t, err)
+
+	bs.SaveBlock(block, partSet, &types.Commit{Height: 1})
+	require.EqualValues(t, 1, bs.Base())
+	require.EqualValues(t, 1, bs.Height())
+
+	err = stateStore.Save(state)
+	require.NoError(t, err)
+
+	err = pruner.SetApplicationBlockRetainHeight(1)
+	require.NoError(t, err)
+	err = pruner.SetCompanionBlockRetainHeight(1)
+	require.NoError(t, err)
+
+	pruned, _, err := pruner.PruneBlocksToHeight(1)
+	require.Equal(t, uint64(0), pruned)
+	require.NoError(t, err)
 }

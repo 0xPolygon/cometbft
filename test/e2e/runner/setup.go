@@ -10,15 +10,21 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/mitchellh/mapstructure"
+	"github.com/spf13/viper"
+
+	_ "embed"
 
 	"github.com/cometbft/cometbft/config"
 	"github.com/cometbft/cometbft/crypto/ed25519"
 	"github.com/cometbft/cometbft/libs/log"
-	"github.com/cometbft/cometbft/p2p"
+	"github.com/cometbft/cometbft/p2p/nodekey"
 	"github.com/cometbft/cometbft/privval"
 	e2e "github.com/cometbft/cometbft/test/e2e/pkg"
 	"github.com/cometbft/cometbft/test/e2e/pkg/infra"
@@ -35,17 +41,15 @@ const (
 	PrivvalStateFile      = "data/priv_validator_state.json"
 	PrivvalDummyKeyFile   = "config/dummy_validator_key.json"
 	PrivvalDummyStateFile = "data/dummy_validator_state.json"
+
+	PrometheusConfigFile = "monitoring/prometheus.yml"
 )
 
 // Setup sets up the testnet configuration.
 func Setup(testnet *e2e.Testnet, infp infra.Provider) error {
-	logger.Info("setup", "msg", log.NewLazySprintf("Generating testnet files in %q", testnet.Dir))
+	logger.Info("setup", "msg", log.NewLazySprintf("Generating testnet files in %#q", testnet.Dir))
 
 	if err := os.MkdirAll(testnet.Dir, os.ModePerm); err != nil {
-		return err
-	}
-
-	if err := infp.Setup(); err != nil {
 		return err
 	}
 
@@ -98,7 +102,7 @@ func Setup(testnet *e2e.Testnet, infp infra.Provider) error {
 			return err
 		}
 
-		err = (&p2p.NodeKey{PrivKey: node.NodeKey}).SaveAs(filepath.Join(nodeDir, "config", "node_key.json"))
+		err = (&nodekey.NodeKey{PrivKey: node.NodeKey}).SaveAs(filepath.Join(nodeDir, "config", "node_key.json"))
 		if err != nil {
 			return err
 		}
@@ -114,12 +118,37 @@ func Setup(testnet *e2e.Testnet, infp infra.Provider) error {
 			filepath.Join(nodeDir, PrivvalDummyKeyFile),
 			filepath.Join(nodeDir, PrivvalDummyStateFile),
 		)).Save()
+
+		if testnet.LatencyEmulationEnabled {
+			// Generate a shell script file containing tc (traffic control) commands
+			// to emulate latency to other nodes.
+			tcCmds, err := tcCommands(node, infp)
+			if err != nil {
+				return err
+			}
+			latencyPath := filepath.Join(nodeDir, "emulate-latency.sh")
+			//nolint: gosec // G306: Expect WriteFile permissions to be 0600 or less
+			if err = os.WriteFile(latencyPath, []byte(strings.Join(tcCmds, "\n")), 0o755); err != nil {
+				return err
+			}
+		}
 	}
 
 	if testnet.Prometheus {
-		if err := testnet.WritePrometheusConfig(); err != nil {
+		if err := WritePrometheusConfig(testnet, PrometheusConfigFile); err != nil {
 			return err
 		}
+		// Make a copy of the Prometheus config file in the testnet directory.
+		// This should be temporary to keep it compatible with the qa-infra
+		// repository.
+		if err := WritePrometheusConfig(testnet, filepath.Join(testnet.Dir, "prometheus.yml")); err != nil {
+			return err
+		}
+	}
+
+	//nolint: revive
+	if err := infp.Setup(); err != nil {
+		return err
 	}
 
 	return nil
@@ -137,10 +166,23 @@ func MakeGenesis(testnet *e2e.Testnet) (types.GenesisDoc, error) {
 	genesis.ConsensusParams.Version.App = 1
 	genesis.ConsensusParams.Evidence.MaxAgeNumBlocks = e2e.EvidenceAgeHeight
 	genesis.ConsensusParams.Evidence.MaxAgeDuration = e2e.EvidenceAgeTime
-	genesis.ConsensusParams.ABCI.VoteExtensionsEnableHeight = testnet.VoteExtensionsEnableHeight
-	for validator, power := range testnet.Validators {
+	genesis.ConsensusParams.Validator.PubKeyTypes = []string{testnet.KeyType}
+	if testnet.BlockMaxBytes != 0 {
+		genesis.ConsensusParams.Block.MaxBytes = testnet.BlockMaxBytes
+	}
+	if testnet.VoteExtensionsUpdateHeight == -1 {
+		genesis.ConsensusParams.Feature.VoteExtensionsEnableHeight = testnet.VoteExtensionsEnableHeight
+	}
+	if testnet.PbtsUpdateHeight == -1 {
+		genesis.ConsensusParams.Feature.PbtsEnableHeight = testnet.PbtsEnableHeight
+	}
+	for valName, power := range testnet.Validators {
+		validator := testnet.LookupNode(valName)
+		if validator == nil {
+			return types.GenesisDoc{}, fmt.Errorf("unknown validator %q for genesis doc", valName)
+		}
 		genesis.Validators = append(genesis.Validators, types.GenesisValidator{
-			Name:    validator.Name,
+			Name:    valName,
 			Address: validator.PrivvalKey.PubKey().Address(),
 			PubKey:  validator.PrivvalKey.PubKey(),
 			Power:   power,
@@ -154,11 +196,40 @@ func MakeGenesis(testnet *e2e.Testnet) (types.GenesisDoc, error) {
 	if len(testnet.InitialState) > 0 {
 		appState, err := json.Marshal(testnet.InitialState)
 		if err != nil {
-			return genesis, err
+			return types.GenesisDoc{}, err
 		}
 		genesis.AppState = appState
 	}
-	return genesis, genesis.ValidateAndComplete()
+
+	// Customized genesis fields provided in the manifest
+	if len(testnet.Genesis) > 0 {
+		v := viper.New()
+		v.SetConfigType("json")
+
+		for _, field := range testnet.Genesis {
+			key, value, err := e2e.ParseKeyValueField("genesis", field)
+			if err != nil {
+				return types.GenesisDoc{}, err
+			}
+			logger.Debug("Applying 'genesis' field", key, value)
+			v.Set(key, value)
+		}
+
+		// We use viper because it leaves untouched keys that are not set.
+		// The GenesisDoc does not use the original `mapstructure` tag.
+		err := v.Unmarshal(&genesis, func(d *mapstructure.DecoderConfig) {
+			d.TagName = "json"
+			d.ErrorUnused = true
+		})
+		if err != nil {
+			return types.GenesisDoc{}, fmt.Errorf("failed parsing 'genesis' field: %v", err)
+		}
+	}
+
+	if err := genesis.ValidateAndComplete(); err != nil {
+		return types.GenesisDoc{}, err
+	}
+	return genesis, nil
 }
 
 // MakeConfig generates a CometBFT config for a node.
@@ -179,9 +250,10 @@ func MakeConfig(node *e2e.Node) (*config.Config, error) {
 	cfg.P2P.AddrBookStrict = false
 
 	cfg.DBBackend = node.Database
-	cfg.StateSync.DiscoveryTime = 5 * time.Second
 	cfg.BlockSync.Version = node.BlockSyncVersion
 	cfg.Consensus.PeerGossipIntraloopSleepDuration = node.Testnet.PeerGossipIntraloopSleepDuration
+	cfg.Mempool.ExperimentalMaxGossipConnectionsToNonPersistentPeers = int(node.Testnet.ExperimentalMaxGossipConnectionsToNonPersistentPeers)
+	cfg.Mempool.ExperimentalMaxGossipConnectionsToPersistentPeers = int(node.Testnet.ExperimentalMaxGossipConnectionsToPersistentPeers)
 
 	// Assume that full nodes and validators will have a data companion
 	// attached, which will need access to the privileged gRPC endpoint.
@@ -201,8 +273,11 @@ func MakeConfig(node *e2e.Node) (*config.Config, error) {
 	case e2e.ProtocolGRPC:
 		cfg.ProxyApp = AppAddressTCP
 		cfg.ABCI = "grpc"
-	case e2e.ProtocolBuiltin, e2e.ProtocolBuiltinConnSync:
-		cfg.ProxyApp = ""
+	case e2e.ProtocolBuiltin:
+		cfg.ProxyApp = "e2e"
+		cfg.ABCI = ""
+	case e2e.ProtocolBuiltinConnSync:
+		cfg.ProxyApp = "e2e_connsync"
 		cfg.ABCI = ""
 	default:
 		return nil, fmt.Errorf("unexpected ABCI protocol setting %q", node.ABCIProtocol)
@@ -250,6 +325,7 @@ func MakeConfig(node *e2e.Node) (*config.Config, error) {
 		if len(cfg.StateSync.RPCServers) < 2 {
 			return nil, errors.New("unable to find 2 suitable state sync RPC servers")
 		}
+		cfg.StateSync.MaxDiscoveryTime = 30 * time.Second
 	}
 
 	cfg.P2P.Seeds = ""
@@ -270,8 +346,56 @@ func MakeConfig(node *e2e.Node) (*config.Config, error) {
 		cfg.P2P.PexReactor = false
 	}
 
+	if node.Testnet.LogLevel != "" {
+		cfg.LogLevel = node.Testnet.LogLevel
+	}
+
+	cfg.LogColors = false
+	if node.Testnet.LogFormat != "" {
+		cfg.LogFormat = node.Testnet.LogFormat
+	}
+
 	if node.Prometheus {
 		cfg.Instrumentation.Prometheus = true
+	}
+
+	if node.ExperimentalKeyLayout != "" {
+		cfg.Storage.ExperimentalKeyLayout = node.ExperimentalKeyLayout
+	}
+
+	if node.Compact {
+		cfg.Storage.Compact = node.Compact
+	}
+
+	if node.DiscardABCIResponses {
+		cfg.Storage.DiscardABCIResponses = node.DiscardABCIResponses
+	}
+
+	if node.Indexer != "" {
+		cfg.TxIndex.Indexer = node.Indexer
+	}
+
+	if node.CompactionInterval != 0 && node.Compact {
+		cfg.Storage.CompactionInterval = node.CompactionInterval
+	}
+
+	// We currently need viper in order to parse config files.
+	if len(node.Config) > 0 {
+		v := viper.New()
+		for _, field := range node.Config {
+			key, value, err := e2e.ParseKeyValueField("config", field)
+			if err != nil {
+				return nil, err
+			}
+			logger.Debug("Applying 'config' field", "node", node.Name, key, value)
+			v.Set(key, value)
+		}
+		err := v.Unmarshal(cfg, func(d *mapstructure.DecoderConfig) {
+			d.ErrorUnused = true
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed parsing 'config' field of node %v: %v", node.Name, err)
+		}
 	}
 
 	return cfg, nil
@@ -279,7 +403,7 @@ func MakeConfig(node *e2e.Node) (*config.Config, error) {
 
 // MakeAppConfig generates an ABCI application config for a node.
 func MakeAppConfig(node *e2e.Node) ([]byte, error) {
-	cfg := map[string]interface{}{
+	cfg := map[string]any{
 		"chain_id":                      node.Testnet.Name,
 		"dir":                           "data/app",
 		"listen":                        AppAddressUNIX,
@@ -295,7 +419,14 @@ func MakeAppConfig(node *e2e.Node) ([]byte, error) {
 		"vote_extension_delay":          node.Testnet.VoteExtensionDelay,
 		"finalize_block_delay":          node.Testnet.FinalizeBlockDelay,
 		"vote_extension_size":           node.Testnet.VoteExtensionSize,
+		"vote_extensions_enable_height": node.Testnet.VoteExtensionsEnableHeight,
+		"vote_extensions_update_height": node.Testnet.VoteExtensionsUpdateHeight,
 		"abci_requests_logging_enabled": node.Testnet.ABCITestsEnabled,
+		"pbts_enable_height":            node.Testnet.PbtsEnableHeight,
+		"pbts_update_height":            node.Testnet.PbtsUpdateHeight,
+		"no_lanes":                      node.Testnet.Manifest.NoLanes,
+		"lanes":                         node.Testnet.Manifest.Lanes,
+		"constant_flip":                 node.Testnet.ConstantFlip,
 	}
 	switch node.ABCIProtocol {
 	case e2e.ProtocolUNIX:
@@ -327,14 +458,24 @@ func MakeAppConfig(node *e2e.Node) ([]byte, error) {
 		}
 	}
 
+	// TODO: check if the produced validator updates is indeed valid.
+	// This goes to the application configuration file.
 	if len(node.Testnet.ValidatorUpdates) > 0 {
 		validatorUpdates := map[string]map[string]int64{}
 		for height, validators := range node.Testnet.ValidatorUpdates {
 			updateVals := map[string]int64{}
-			for node, power := range validators {
-				updateVals[base64.StdEncoding.EncodeToString(node.PrivvalKey.PubKey().Bytes())] = power
+			for valName, power := range validators {
+				validator := node.Testnet.LookupNode(valName)
+				if validator == nil {
+					return nil, fmt.Errorf("unknown validator %q for validator updates in testnet, height %d", valName, height)
+				}
+				updateVals[base64.StdEncoding.EncodeToString(validator.PrivvalKey.PubKey().Bytes())] = power
 			}
-			validatorUpdates[fmt.Sprintf("%v", height)] = updateVals
+			// TODO: the validator updates are written to the toml
+			// file in lexicographical order. This means that
+			// update 1000 comes after update 1, and much before
+			// update 2. Consider producing `0001` instead of `1`.
+			validatorUpdates[strconv.FormatInt(height, 10)] = updateVals
 		}
 		cfg["validator_update"] = validatorUpdates
 	}
@@ -345,6 +486,26 @@ func MakeAppConfig(node *e2e.Node) ([]byte, error) {
 		return nil, fmt.Errorf("failed to generate app config: %w", err)
 	}
 	return buf.Bytes(), nil
+}
+
+//go:embed templates/prometheus-yml.tmpl
+var prometheusYamlTemplate string
+
+func WritePrometheusConfig(testnet *e2e.Testnet, path string) error {
+	tmpl, err := template.New("prometheus-yaml").Parse(prometheusYamlTemplate)
+	if err != nil {
+		return err
+	}
+	var buf bytes.Buffer
+	err = tmpl.Execute(&buf, testnet)
+	if err != nil {
+		return err
+	}
+	err = os.WriteFile(path, buf.Bytes(), 0o644) //nolint:gosec
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // UpdateConfigStateSync updates the state sync config for a node.

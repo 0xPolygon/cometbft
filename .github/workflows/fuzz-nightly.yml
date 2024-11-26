@@ -9,15 +9,20 @@ on:
     paths:
       - "test/fuzz/**/*.go"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   fuzz-nightly-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/setup-go@v4
-        with:
-          go-version: '1.21'
-
       - uses: actions/checkout@v4
+      - run: echo "GO_VERSION=$(cat .github/workflows/go-version.env | grep GO_VERSION | cut -d '=' -f2)" >> $GITHUB_ENV
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
 
       - name: Install go-fuzz
         working-directory: test/fuzz
@@ -49,14 +54,14 @@ jobs:
         continue-on-error: true
 
       - name: Archive crashers
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: crashers
           path: test/fuzz/**/crashers
           retention-days: 3
 
       - name: Archive suppressions
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: suppressions
           path: test/fuzz/**/suppressions
@@ -76,23 +81,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Notify Slack on failure
-        uses: slackapi/slack-github-action@v1.24.0
+        uses: slackapi/slack-github-action@v2.0.0
         env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
           BRANCH: ${{ github.ref_name }}
           CRASHERS: ${{ needs.fuzz-nightly-test.outputs.crashers-count }}
           RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
         with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
           payload: |
-            {
-              "blocks": [
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": ":skull: Nightly fuzz tests for `${{ env.BRANCH }}` failed with ${{ env.CRASHERS }} crasher(s). See the <${{ env.RUN_URL }}|run details>."
-                  }
-                }
-              ]
-            }
+            blocks:
+            - type: "section"
+              text:
+                type: "mrkdwn"
+                text: ":skull: Nightly fuzz tests for `${{ env.BRANCH }}` failed with ${{ env.CRASHERS }} crasher(s). See the <${{ env.RUN_URL }}|run details>."

@@ -9,13 +9,12 @@ import (
 	"time"
 
 	abci "github.com/cometbft/cometbft/abci/types"
+	cfg "github.com/cometbft/cometbft/config"
+	cmtnet "github.com/cometbft/cometbft/internal/net"
 	"github.com/cometbft/cometbft/internal/test"
 	"github.com/cometbft/cometbft/libs/log"
-
-	cfg "github.com/cometbft/cometbft/config"
-	cmtnet "github.com/cometbft/cometbft/libs/net"
 	nm "github.com/cometbft/cometbft/node"
-	"github.com/cometbft/cometbft/p2p"
+	"github.com/cometbft/cometbft/p2p/nodekey"
 	"github.com/cometbft/cometbft/privval"
 	"github.com/cometbft/cometbft/proxy"
 	ctypes "github.com/cometbft/cometbft/rpc/core/types"
@@ -25,8 +24,9 @@ import (
 // Options helps with specifying some parameters for our RPC testing for greater
 // control.
 type Options struct {
-	suppressStdout bool
-	recreateConfig bool
+	suppressStdout  bool
+	recreateConfig  bool
+	maxReqBatchSize int
 }
 
 var (
@@ -45,7 +45,7 @@ func waitForRPC() {
 	}
 	result := new(ctypes.ResultStatus)
 	for {
-		_, err := client.Call(context.Background(), "status", map[string]interface{}{}, result)
+		_, err := client.Call(context.Background(), "status", map[string]any{}, result)
 		if err == nil {
 			return
 		}
@@ -55,7 +55,7 @@ func waitForRPC() {
 	}
 }
 
-// f**ing long, but unique for each test
+// f**ing long, but unique for each test.
 func makePathname() string {
 	// get path
 	p, err := os.Getwd()
@@ -97,7 +97,7 @@ func createConfig() *cfg.Config {
 	return c
 }
 
-// GetConfig returns a config for the test cases as a singleton
+// GetConfig returns a config for the test cases as a singleton.
 func GetConfig(forceCreate ...bool) *cfg.Config {
 	if globalConfig == nil || (len(forceCreate) > 0 && forceCreate[0]) {
 		globalConfig = createConfig()
@@ -105,7 +105,7 @@ func GetConfig(forceCreate ...bool) *cfg.Config {
 	return globalConfig
 }
 
-// StartCometBFT starts a test CometBFT server in a go routine and returns when it is initialized
+// StartCometBFT starts a test CometBFT server in a go routine and returns when it is initialized.
 func StartCometBFT(app abci.Application, opts ...func(*Options)) *nm.Node {
 	nodeOpts := defaultOptions
 	for _, opt := range opts {
@@ -137,7 +137,7 @@ func StopCometBFT(node *nm.Node) {
 	os.RemoveAll(node.Config().RootDir)
 }
 
-// NewCometBFT creates a new CometBFT server and sleeps forever
+// NewCometBFT creates a new CometBFT server and sleeps forever.
 func NewCometBFT(app abci.Application, opts *Options) *nm.Node {
 	// Create & start node
 	config := GetConfig(opts.recreateConfig)
@@ -145,14 +145,20 @@ func NewCometBFT(app abci.Application, opts *Options) *nm.Node {
 	if opts.suppressStdout {
 		logger = log.NewNopLogger()
 	} else {
-		logger = log.NewTMLogger(log.NewSyncWriter(os.Stdout))
+		logger = log.NewLogger(os.Stdout)
 		logger = log.NewFilter(logger, log.AllowError())
+	}
+	if opts.maxReqBatchSize > 0 {
+		config.RPC.MaxRequestBatchSize = opts.maxReqBatchSize
 	}
 	pvKeyFile := config.PrivValidatorKeyFile()
 	pvKeyStateFile := config.PrivValidatorStateFile()
-	pv := privval.LoadOrGenFilePV(pvKeyFile, pvKeyStateFile)
+	pv, err := privval.LoadOrGenFilePV(pvKeyFile, pvKeyStateFile, nil)
+	if err != nil {
+		panic(err)
+	}
 	papp := proxy.NewLocalClientCreator(app)
-	nodeKey, err := p2p.LoadOrGenNodeKey(config.NodeKeyFile())
+	nodeKey, err := nodekey.LoadOrGen(config.NodeKeyFile())
 	if err != nil {
 		panic(err)
 	}
@@ -177,4 +183,9 @@ func SuppressStdout(o *Options) {
 // time, instead of treating it as a global singleton.
 func RecreateConfig(o *Options) {
 	o.recreateConfig = true
+}
+
+// MaxReqBatchSize is an option to limit the maximum number of requests per batch.
+func MaxReqBatchSize(o *Options) {
+	o.maxReqBatchSize = 2
 }

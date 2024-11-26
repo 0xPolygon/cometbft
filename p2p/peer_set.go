@@ -3,25 +3,35 @@ package p2p
 import (
 	"net"
 
+	cmtrand "github.com/cometbft/cometbft/internal/rand"
 	cmtsync "github.com/cometbft/cometbft/libs/sync"
+	"github.com/cometbft/cometbft/p2p/nodekey"
 )
 
 // IPeerSet has a (immutable) subset of the methods of PeerSet.
 type IPeerSet interface {
-	Has(key ID) bool
+	// Has returns true if the set contains the peer referred to by this key.
+	Has(key nodekey.ID) bool
+	// HasIP returns true if the set contains the peer referred to by this IP
 	HasIP(ip net.IP) bool
-	Get(key ID) Peer
-	List() []Peer
+	// Get returns the peer with the given key, or nil if not found.
+	Get(key nodekey.ID) Peer
+	// Copy returns a copy of the peers list.
+	Copy() []Peer
+	// Size returns the number of peers in the PeerSet.
 	Size() int
+	// ForEach iterates over the PeerSet and calls the given function for each peer.
+	ForEach(peer func(Peer))
+	// Random returns a random peer from the PeerSet.
+	Random() Peer
 }
 
-//-----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
-// PeerSet is a special structure for keeping a table of peers.
-// Iteration over the peers is super fast and thread-safe.
+// PeerSet is a special thread-safe structure for keeping a table of peers.
 type PeerSet struct {
 	mtx    cmtsync.Mutex
-	lookup map[ID]*peerSetItem
+	lookup map[nodekey.ID]*peerSetItem
 	list   []Peer
 }
 
@@ -33,7 +43,7 @@ type peerSetItem struct {
 // NewPeerSet creates a new peerSet with a list of initial capacity of 256 items.
 func NewPeerSet() *PeerSet {
 	return &PeerSet{
-		lookup: make(map[ID]*peerSetItem),
+		lookup: make(map[nodekey.ID]*peerSetItem),
 		list:   make([]Peer, 0, 256),
 	}
 }
@@ -61,7 +71,7 @@ func (ps *PeerSet) Add(peer Peer) error {
 
 // Has returns true if the set contains the peer referred to by this
 // peerKey, otherwise false.
-func (ps *PeerSet) Has(peerKey ID) bool {
+func (ps *PeerSet) Has(peerKey nodekey.ID) bool {
 	ps.mtx.Lock()
 	_, ok := ps.lookup[peerKey]
 	ps.mtx.Unlock()
@@ -74,14 +84,8 @@ func (ps *PeerSet) HasIP(peerIP net.IP) bool {
 	ps.mtx.Lock()
 	defer ps.mtx.Unlock()
 
-	return ps.hasIP(peerIP)
-}
-
-// hasIP does not acquire a lock so it can be used in public methods which
-// already lock.
-func (ps *PeerSet) hasIP(peerIP net.IP) bool {
-	for _, item := range ps.lookup {
-		if item.peer.RemoteIP().Equal(peerIP) {
+	for _, peer := range ps.list {
+		if peer.RemoteIP().Equal(peerIP) {
 			return true
 		}
 	}
@@ -91,9 +95,10 @@ func (ps *PeerSet) hasIP(peerIP net.IP) bool {
 
 // Get looks up a peer by the provided peerKey. Returns nil if peer is not
 // found.
-func (ps *PeerSet) Get(peerKey ID) Peer {
+func (ps *PeerSet) Get(peerKey nodekey.ID) Peer {
 	ps.mtx.Lock()
 	defer ps.mtx.Unlock()
+
 	item, ok := ps.lookup[peerKey]
 	if ok {
 		return item.peer
@@ -101,15 +106,13 @@ func (ps *PeerSet) Get(peerKey ID) Peer {
 	return nil
 }
 
-// Remove discards peer by its Key, if the peer was previously memoized.
-// Returns true if the peer was removed, and false if it was not found.
-// in the set.
+// Remove removes the peer from the PeerSet.
 func (ps *PeerSet) Remove(peer Peer) bool {
 	ps.mtx.Lock()
 	defer ps.mtx.Unlock()
 
-	item := ps.lookup[peer.ID()]
-	if item == nil {
+	item, ok := ps.lookup[peer.ID()]
+	if !ok || len(ps.list) == 0 {
 		// Removing the peer has failed so we set a flag to mark that a removal was attempted.
 		// This can happen when the peer add routine from the switch is running in
 		// parallel to the receive routine of MConn.
@@ -118,27 +121,24 @@ func (ps *PeerSet) Remove(peer Peer) bool {
 		peer.SetRemovalFailed()
 		return false
 	}
-
 	index := item.index
-	// Create a new copy of the list but with one less item.
-	// (we must copy because we'll be mutating the list).
-	newList := make([]Peer, len(ps.list)-1)
-	copy(newList, ps.list)
-	// If it's the last peer, that's an easy special case.
-	if index == len(ps.list)-1 {
-		ps.list = newList
-		delete(ps.lookup, peer.ID())
-		return true
+
+	// Remove from ps.lookup.
+	delete(ps.lookup, peer.ID())
+
+	// If it's not the last item.
+	if index != len(ps.list)-1 {
+		// Swap it with the last item.
+		lastPeer := ps.list[len(ps.list)-1]
+		item := ps.lookup[lastPeer.ID()]
+		item.index = index
+		ps.list[index] = item.peer
 	}
 
-	// Replace the popped item with the last item in the old list.
-	lastPeer := ps.list[len(ps.list)-1]
-	lastPeerKey := lastPeer.ID()
-	lastPeerItem := ps.lookup[lastPeerKey]
-	newList[index] = lastPeer
-	lastPeerItem.index = index
-	ps.list = newList
-	delete(ps.lookup, peer.ID())
+	// Remove the last item from ps.list.
+	ps.list[len(ps.list)-1] = nil // nil the last entry of the slice to shorten, so it isn't reachable & can be GC'd.
+	ps.list = ps.list[:len(ps.list)-1]
+
 	return true
 }
 
@@ -149,9 +149,36 @@ func (ps *PeerSet) Size() int {
 	return len(ps.list)
 }
 
-// List returns the threadsafe list of peers.
-func (ps *PeerSet) List() []Peer {
+// Copy returns the copy of the peers list.
+//
+// Note: there are no guarantees about the thread-safety of Peer objects.
+func (ps *PeerSet) Copy() []Peer {
 	ps.mtx.Lock()
 	defer ps.mtx.Unlock()
-	return ps.list
+
+	c := make([]Peer, len(ps.list))
+	copy(c, ps.list)
+	return c
+}
+
+// ForEach iterates over the PeerSet and calls the given function for each peer.
+func (ps *PeerSet) ForEach(fn func(peer Peer)) {
+	ps.mtx.Lock()
+	defer ps.mtx.Unlock()
+
+	for _, item := range ps.lookup {
+		fn(item.peer)
+	}
+}
+
+// Random returns a random peer from the PeerSet.
+func (ps *PeerSet) Random() Peer {
+	ps.mtx.Lock()
+	defer ps.mtx.Unlock()
+
+	if len(ps.list) == 0 {
+		return nil
+	}
+
+	return ps.list[cmtrand.Int()%len(ps.list)]
 }

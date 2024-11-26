@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	dbm "github.com/cometbft/cometbft-db"
-
 	abci "github.com/cometbft/cometbft/abci/types"
 	ctypes "github.com/cometbft/cometbft/rpc/core/types"
 	rpctypes "github.com/cometbft/cometbft/rpc/jsonrpc/types"
@@ -68,12 +67,13 @@ func TestBlockchainInfo(t *testing.T) {
 }
 
 func TestBlockResults(t *testing.T) {
-	results := &abci.ResponseFinalizeBlock{
+	results := &abci.FinalizeBlockResponse{
 		TxResults: []*abci.ExecTxResult{
 			{Code: 0, Data: []byte{0x01}, Log: "ok"},
 			{Code: 0, Data: []byte{0x02}, Log: "ok"},
 			{Code: 1, Log: "not ok"},
 		},
+		AppHash: make([]byte, 1),
 	}
 
 	env := &Environment{}
@@ -97,19 +97,20 @@ func TestBlockResults(t *testing.T) {
 		{101, true, nil},
 		{100, false, &ctypes.ResultBlockResults{
 			Height:                100,
-			TxsResults:            results.TxResults,
+			TxResults:             results.TxResults,
 			FinalizeBlockEvents:   results.Events,
 			ValidatorUpdates:      results.ValidatorUpdates,
 			ConsensusParamUpdates: results.ConsensusParamUpdates,
+			AppHash:               make([]byte, 1),
 		}},
 	}
 
 	for _, tc := range testCases {
 		res, err := env.BlockResults(&rpctypes.Context{}, &tc.height)
 		if tc.wantErr {
-			assert.Error(t, err)
+			require.Error(t, err)
 		} else {
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.Equal(t, tc.wantRes, res)
 		}
 	}

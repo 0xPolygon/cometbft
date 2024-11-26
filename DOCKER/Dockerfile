@@ -1,9 +1,9 @@
 # Use a build arg to ensure that both stages use the same,
 # hopefully current, go version.
-ARG GOLANG_BASE_IMAGE=golang:1.21-alpine
+ARG GOLANG_BASE_IMAGE=golang:1.23.1-alpine
 
 # stage 1 Generate CometBFT Binary
-FROM --platform=$BUILDPLATFORM $GOLANG_BASE_IMAGE as builder
+FROM --platform=$BUILDPLATFORM $GOLANG_BASE_IMAGE AS builder
 RUN apk update && \
     apk upgrade && \
     apk --no-cache add make git

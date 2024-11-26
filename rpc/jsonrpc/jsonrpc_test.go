@@ -10,27 +10,25 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/go-kit/log/term"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/cometbft/cometbft/internal/net"
+	cmtrand "github.com/cometbft/cometbft/internal/rand"
 	cmtbytes "github.com/cometbft/cometbft/libs/bytes"
 	"github.com/cometbft/cometbft/libs/log"
-	cmtrand "github.com/cometbft/cometbft/libs/rand"
-
-	client "github.com/cometbft/cometbft/rpc/jsonrpc/client"
-	server "github.com/cometbft/cometbft/rpc/jsonrpc/server"
-	types "github.com/cometbft/cometbft/rpc/jsonrpc/types"
+	"github.com/cometbft/cometbft/rpc/jsonrpc/client"
+	"github.com/cometbft/cometbft/rpc/jsonrpc/server"
+	"github.com/cometbft/cometbft/rpc/jsonrpc/types"
 )
 
-// Client and Server should work over tcp or unix sockets
+// Client and Server should work over tcp or unix sockets.
 const (
-	tcpAddr = "tcp://127.0.0.1:47768"
-
 	unixSocket = "/tmp/rpc_test.sock"
 	unixAddr   = "unix://" + unixSocket
 
@@ -39,7 +37,12 @@ const (
 	testVal = "acbd"
 )
 
-var ctx = context.Background()
+var (
+	ctx     = context.Background()
+	baseIP  = "tcp://127.0.0.1"
+	port, _ = net.GetFreePort()
+	tcpAddr = baseIP + ":" + strconv.Itoa(port)
+)
 
 type ResultEcho struct {
 	Value string `json:"value"`
@@ -61,7 +64,7 @@ type ResultEchoWithDefault struct {
 	Value int `json:"value"`
 }
 
-// Define some routes
+// Define some routes.
 var Routes = map[string]*server.RPCFunc{
 	"echo":            server.NewRPCFunc(EchoResult, "arg"),
 	"echo_ws":         server.NewWSRPCFunc(EchoWSResult, "arg"),
@@ -105,22 +108,9 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-var colorFn = func(keyvals ...interface{}) term.FgBgColor {
-	for i := 0; i < len(keyvals)-1; i += 2 {
-		if keyvals[i] == "socket" {
-			if keyvals[i+1] == "tcp" {
-				return term.FgBgColor{Fg: term.DarkBlue}
-			} else if keyvals[i+1] == "unix" {
-				return term.FgBgColor{Fg: term.DarkCyan}
-			}
-		}
-	}
-	return term.FgBgColor{}
-}
-
-// launch unix and tcp servers
+// launch unix and tcp servers.
 func setup() {
-	logger := log.NewTMLoggerWithColorFn(log.NewSyncWriter(os.Stdout), colorFn)
+	logger := log.NewLogger(os.Stdout)
 
 	cmd := exec.Command("rm", "-f", unixSocket)
 	err := cmd.Start()
@@ -171,7 +161,7 @@ func setup() {
 }
 
 func echoViaHTTP(cl client.Caller, val string) (string, error) {
-	params := map[string]interface{}{
+	params := map[string]any{
 		"arg": val,
 	}
 	result := new(ResultEcho)
@@ -182,7 +172,7 @@ func echoViaHTTP(cl client.Caller, val string) (string, error) {
 }
 
 func echoIntViaHTTP(cl client.Caller, val int) (int, error) {
-	params := map[string]interface{}{
+	params := map[string]any{
 		"arg": val,
 	}
 	result := new(ResultEchoInt)
@@ -193,7 +183,7 @@ func echoIntViaHTTP(cl client.Caller, val int) (int, error) {
 }
 
 func echoBytesViaHTTP(cl client.Caller, bytes []byte) ([]byte, error) {
-	params := map[string]interface{}{
+	params := map[string]any{
 		"arg": bytes,
 	}
 	result := new(ResultEchoBytes)
@@ -204,7 +194,7 @@ func echoBytesViaHTTP(cl client.Caller, bytes []byte) ([]byte, error) {
 }
 
 func echoDataBytesViaHTTP(cl client.Caller, bytes cmtbytes.HexBytes) (cmtbytes.HexBytes, error) {
-	params := map[string]interface{}{
+	params := map[string]any{
 		"arg": bytes,
 	}
 	result := new(ResultEchoDataBytes)
@@ -215,7 +205,7 @@ func echoDataBytesViaHTTP(cl client.Caller, bytes cmtbytes.HexBytes) (cmtbytes.H
 }
 
 func echoWithDefaultViaHTTP(cl client.Caller, v *int) (int, error) {
-	params := map[string]interface{}{}
+	params := map[string]any{}
 	if v != nil {
 		params["arg"] = *v
 	}
@@ -227,6 +217,7 @@ func echoWithDefaultViaHTTP(cl client.Caller, v *int) (int, error) {
 }
 
 func testWithHTTPClient(t *testing.T, cl client.HTTPClient) {
+	t.Helper()
 	val := testVal
 	got, err := echoViaHTTP(cl, val)
 	require.NoError(t, err)
@@ -249,7 +240,7 @@ func testWithHTTPClient(t *testing.T, cl client.HTTPClient) {
 
 	got5, err := echoWithDefaultViaHTTP(cl, nil)
 	require.NoError(t, err)
-	assert.Equal(t, got5, -1)
+	assert.Equal(t, -1, got5)
 
 	val6 := cmtrand.Intn(10000)
 	got6, err := echoWithDefaultViaHTTP(cl, &val6)
@@ -258,7 +249,7 @@ func testWithHTTPClient(t *testing.T, cl client.HTTPClient) {
 }
 
 func echoViaWS(cl *client.WSClient, val string) (string, error) {
-	params := map[string]interface{}{
+	params := map[string]any{
 		"arg": val,
 	}
 	err := cl.Call(context.Background(), "echo", params)
@@ -273,13 +264,13 @@ func echoViaWS(cl *client.WSClient, val string) (string, error) {
 	result := new(ResultEcho)
 	err = json.Unmarshal(msg.Result, result)
 	if err != nil {
-		return "", nil
+		return "", err
 	}
 	return result.Value, nil
 }
 
 func echoBytesViaWS(cl *client.WSClient, bytes []byte) ([]byte, error) {
-	params := map[string]interface{}{
+	params := map[string]any{
 		"arg": bytes,
 	}
 	err := cl.Call(context.Background(), "echo_bytes", params)
@@ -294,43 +285,44 @@ func echoBytesViaWS(cl *client.WSClient, bytes []byte) ([]byte, error) {
 	result := new(ResultEchoBytes)
 	err = json.Unmarshal(msg.Result, result)
 	if err != nil {
-		return []byte{}, nil
+		return []byte{}, err
 	}
 	return result.Value, nil
 }
 
 func testWithWSClient(t *testing.T, cl *client.WSClient) {
+	t.Helper()
 	val := testVal
 	got, err := echoViaWS(cl, val)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, got, val)
 
 	val2 := randBytes(t)
 	got2, err := echoBytesViaWS(cl, val2)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, got2, val2)
 }
 
-//-------------
+// -------------
 
 func TestServersAndClientsBasic(t *testing.T) {
 	serverAddrs := [...]string{tcpAddr, unixAddr}
 	for _, addr := range serverAddrs {
 		cl1, err := client.NewURI(addr)
-		require.Nil(t, err)
+		require.NoError(t, err)
 		fmt.Printf("=== testing server on %s using URI client", addr)
 		testWithHTTPClient(t, cl1)
 
 		cl2, err := client.New(addr)
-		require.Nil(t, err)
+		require.NoError(t, err)
 		fmt.Printf("=== testing server on %s using JSONRPC client", addr)
 		testWithHTTPClient(t, cl2)
 
 		cl3, err := client.NewWS(addr, websocketEndpoint)
-		require.Nil(t, err)
+		require.NoError(t, err)
 		cl3.SetLogger(log.TestingLogger())
 		err = cl3.Start()
-		require.Nil(t, err)
+		require.NoError(t, err)
 		fmt.Printf("=== testing server on %s using WS client", addr)
 		testWithWSClient(t, cl3)
 		err = cl3.Stop()
@@ -342,20 +334,20 @@ func TestServersAndClientsBasicV1(t *testing.T) {
 	serverAddrs := [...]string{tcpAddr, unixAddr}
 	for _, addr := range serverAddrs {
 		cl1, err := client.NewURI(addr)
-		require.Nil(t, err)
+		require.NoError(t, err)
 		fmt.Printf("=== testing server on %s using URI client", addr)
 		testWithHTTPClient(t, cl1)
 
 		cl2, err := client.New(addr)
-		require.Nil(t, err)
+		require.NoError(t, err)
 		fmt.Printf("=== testing server on %s using JSONRPC client", addr)
 		testWithHTTPClient(t, cl2)
 
 		cl3, err := client.NewWS(addr, "/v1"+websocketEndpoint)
-		require.Nil(t, err)
+		require.NoError(t, err)
 		cl3.SetLogger(log.TestingLogger())
 		err = cl3.Start()
-		require.Nil(t, err)
+		require.NoError(t, err)
 		fmt.Printf("=== testing server on %s using WS client", addr)
 		testWithWSClient(t, cl3)
 		err = cl3.Stop()
@@ -365,30 +357,30 @@ func TestServersAndClientsBasicV1(t *testing.T) {
 
 func TestHexStringArg(t *testing.T) {
 	cl, err := client.NewURI(tcpAddr)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	// should NOT be handled as hex
 	val := "0xabc"
 	got, err := echoViaHTTP(cl, val)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, got, val)
 }
 
 func TestQuotedStringArg(t *testing.T) {
 	cl, err := client.NewURI(tcpAddr)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	// should NOT be unquoted
 	val := "\"abc\""
 	got, err := echoViaHTTP(cl, val)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, got, val)
 }
 
 func TestWSNewWSRPCFunc(t *testing.T) {
 	cl, err := client.NewWS(tcpAddr, websocketEndpoint)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	cl.SetLogger(log.TestingLogger())
 	err = cl.Start()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	t.Cleanup(func() {
 		if err := cl.Stop(); err != nil {
 			t.Error(err)
@@ -396,11 +388,11 @@ func TestWSNewWSRPCFunc(t *testing.T) {
 	})
 
 	val := testVal
-	params := map[string]interface{}{
+	params := map[string]any{
 		"arg": val,
 	}
 	err = cl.Call(context.Background(), "echo_ws", params)
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	msg := <-cl.ResponsesCh
 	if msg.Error != nil {
@@ -408,17 +400,17 @@ func TestWSNewWSRPCFunc(t *testing.T) {
 	}
 	result := new(ResultEcho)
 	err = json.Unmarshal(msg.Result, result)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	got := result.Value
 	assert.Equal(t, got, val)
 }
 
 func TestWSNewWSRPCFuncV1(t *testing.T) {
 	cl, err := client.NewWS(tcpAddr, "/v1"+websocketEndpoint)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	cl.SetLogger(log.TestingLogger())
 	err = cl.Start()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	t.Cleanup(func() {
 		if err := cl.Stop(); err != nil {
 			t.Error(err)
@@ -426,11 +418,11 @@ func TestWSNewWSRPCFuncV1(t *testing.T) {
 	})
 
 	val := testVal
-	params := map[string]interface{}{
+	params := map[string]any{
 		"arg": val,
 	}
 	err = cl.Call(context.Background(), "echo_ws", params)
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	msg := <-cl.ResponsesCh
 	if msg.Error != nil {
@@ -438,17 +430,17 @@ func TestWSNewWSRPCFuncV1(t *testing.T) {
 	}
 	result := new(ResultEcho)
 	err = json.Unmarshal(msg.Result, result)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	got := result.Value
 	assert.Equal(t, got, val)
 }
 
 func TestWSHandlesArrayParams(t *testing.T) {
 	cl, err := client.NewWS(tcpAddr, websocketEndpoint)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	cl.SetLogger(log.TestingLogger())
 	err = cl.Start()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	t.Cleanup(func() {
 		if err := cl.Stop(); err != nil {
 			t.Error(err)
@@ -456,9 +448,9 @@ func TestWSHandlesArrayParams(t *testing.T) {
 	})
 
 	val := testVal
-	params := []interface{}{val}
+	params := []any{val}
 	err = cl.CallWithArrayParams(context.Background(), "echo_ws", params)
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	msg := <-cl.ResponsesCh
 	if msg.Error != nil {
@@ -466,17 +458,17 @@ func TestWSHandlesArrayParams(t *testing.T) {
 	}
 	result := new(ResultEcho)
 	err = json.Unmarshal(msg.Result, result)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	got := result.Value
 	assert.Equal(t, got, val)
 }
 
 func TestWSHandlesArrayParamsV1(t *testing.T) {
 	cl, err := client.NewWS(tcpAddr, "/v1"+websocketEndpoint)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	cl.SetLogger(log.TestingLogger())
 	err = cl.Start()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	t.Cleanup(func() {
 		if err := cl.Stop(); err != nil {
 			t.Error(err)
@@ -484,9 +476,9 @@ func TestWSHandlesArrayParamsV1(t *testing.T) {
 	})
 
 	val := testVal
-	params := []interface{}{val}
+	params := []any{val}
 	err = cl.CallWithArrayParams(context.Background(), "echo_ws", params)
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	msg := <-cl.ResponsesCh
 	if msg.Error != nil {
@@ -494,7 +486,7 @@ func TestWSHandlesArrayParamsV1(t *testing.T) {
 	}
 	result := new(ResultEcho)
 	err = json.Unmarshal(msg.Result, result)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	got := result.Value
 	assert.Equal(t, got, val)
 }
@@ -503,10 +495,10 @@ func TestWSHandlesArrayParamsV1(t *testing.T) {
 // & pongs so connection stays alive.
 func TestWSClientPingPong(t *testing.T) {
 	cl, err := client.NewWS(tcpAddr, websocketEndpoint)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	cl.SetLogger(log.TestingLogger())
 	err = cl.Start()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	t.Cleanup(func() {
 		if err := cl.Stop(); err != nil {
 			t.Error(err)
@@ -518,10 +510,10 @@ func TestWSClientPingPong(t *testing.T) {
 
 func TestWSClientPingPongV1(t *testing.T) {
 	cl, err := client.NewWS(tcpAddr, "/v1"+websocketEndpoint)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	cl.SetLogger(log.TestingLogger())
 	err = cl.Start()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	t.Cleanup(func() {
 		if err := cl.Stop(); err != nil {
 			t.Error(err)
@@ -537,14 +529,14 @@ func TestJSONRPCCaching(t *testing.T) {
 	require.NoError(t, err)
 
 	// Not supplying the arg should result in not caching
-	params := make(map[string]interface{})
+	params := make(map[string]any)
 	req, err := types.MapToRequest(types.JSONRPCIntID(1000), "echo_default", params)
 	require.NoError(t, err)
 
 	res1, err := rawJSONRPCRequest(t, cl, httpAddr, req)
 	defer func() { _ = res1.Body.Close() }()
 	require.NoError(t, err)
-	assert.Equal(t, "", res1.Header.Get("Cache-control"))
+	assert.Equal(t, "", res1.Header.Get("Cache-Control"))
 
 	// Supplying the arg should result in caching
 	params["arg"] = cmtrand.Intn(10000)
@@ -554,10 +546,11 @@ func TestJSONRPCCaching(t *testing.T) {
 	res2, err := rawJSONRPCRequest(t, cl, httpAddr, req)
 	defer func() { _ = res2.Body.Close() }()
 	require.NoError(t, err)
-	assert.Equal(t, "public, max-age=86400", res2.Header.Get("Cache-control"))
+	assert.Equal(t, "public, max-age=86400", res2.Header.Get("Cache-Control"))
 }
 
-func rawJSONRPCRequest(t *testing.T, cl *http.Client, url string, req interface{}) (*http.Response, error) {
+func rawJSONRPCRequest(t *testing.T, cl *http.Client, url string, req any) (*http.Response, error) {
+	t.Helper()
 	reqBytes, err := json.Marshal(req)
 	require.NoError(t, err)
 
@@ -565,12 +558,13 @@ func rawJSONRPCRequest(t *testing.T, cl *http.Client, url string, req interface{
 	httpReq, err := http.NewRequest(http.MethodPost, url, reqBuf)
 	require.NoError(t, err)
 
-	httpReq.Header.Set("Content-type", "application/json")
+	httpReq.Header.Set("Content-Type", "application/json")
 
 	return cl.Do(httpReq)
 }
 
 func TestURICaching(t *testing.T) {
+	t.Helper()
 	httpAddr := strings.Replace(tcpAddr, "tcp://", "http://", 1)
 	cl, err := client.DefaultHTTPClient(httpAddr)
 	require.NoError(t, err)
@@ -580,17 +574,18 @@ func TestURICaching(t *testing.T) {
 	res1, err := rawURIRequest(t, cl, httpAddr+"/echo_default", args)
 	defer func() { _ = res1.Body.Close() }()
 	require.NoError(t, err)
-	assert.Equal(t, "", res1.Header.Get("Cache-control"))
+	assert.Equal(t, "", res1.Header.Get("Cache-Control"))
 
 	// Supplying the arg should result in caching
-	args.Set("arg", fmt.Sprintf("%d", cmtrand.Intn(10000)))
+	args.Set("arg", strconv.Itoa(cmtrand.Intn(10000)))
 	res2, err := rawURIRequest(t, cl, httpAddr+"/echo_default", args)
 	defer func() { _ = res2.Body.Close() }()
 	require.NoError(t, err)
-	assert.Equal(t, "public, max-age=86400", res2.Header.Get("Cache-control"))
+	assert.Equal(t, "public, max-age=86400", res2.Header.Get("Cache-Control"))
 }
 
 func rawURIRequest(t *testing.T, cl *http.Client, url string, args url.Values) (*http.Response, error) {
+	t.Helper()
 	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(args.Encode()))
 	require.NoError(t, err)
 
@@ -600,9 +595,10 @@ func rawURIRequest(t *testing.T, cl *http.Client, url string, args url.Values) (
 }
 
 func randBytes(t *testing.T) []byte {
+	t.Helper()
 	n := cmtrand.Intn(10) + 2
 	buf := make([]byte, n)
 	_, err := crand.Read(buf)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	return bytes.ReplaceAll(buf, []byte("="), []byte{100})
 }

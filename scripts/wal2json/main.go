@@ -8,11 +8,12 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 
-	cs "github.com/cometbft/cometbft/consensus"
+	cs "github.com/cometbft/cometbft/internal/consensus"
 	cmtjson "github.com/cometbft/cometbft/libs/json"
 )
 
@@ -31,7 +32,7 @@ func main() {
 	dec := cs.NewWALDecoder(f)
 	for {
 		msg, err := dec.Decode()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		} else if err != nil {
 			panic(fmt.Errorf("failed to decode msg: %v", err))
@@ -57,6 +58,5 @@ func main() {
 			fmt.Println("Failed to write message", err)
 			os.Exit(1) //nolint:gocritic
 		}
-
 	}
 }

@@ -9,47 +9,49 @@ import (
 
 	"github.com/cometbft/cometbft/crypto/ed25519"
 	"github.com/cometbft/cometbft/libs/service"
+	na "github.com/cometbft/cometbft/p2p/netaddr"
+	ni "github.com/cometbft/cometbft/p2p/nodeinfo"
+	"github.com/cometbft/cometbft/p2p/nodekey"
 )
 
-// mockPeer for testing the PeerSet
+// mockPeer for testing the PeerSet.
 type mockPeer struct {
 	service.BaseService
 	ip net.IP
-	id ID
+	id nodekey.ID
 }
 
-func (mp *mockPeer) FlushStop()               { mp.Stop() } //nolint:errcheck // ignore error
-func (mp *mockPeer) TrySend(Envelope) bool    { return true }
-func (mp *mockPeer) Send(Envelope) bool       { return true }
-func (mp *mockPeer) NodeInfo() NodeInfo       { return DefaultNodeInfo{} }
-func (mp *mockPeer) Status() ConnectionStatus { return ConnectionStatus{} }
-func (mp *mockPeer) ID() ID                   { return mp.id }
-func (mp *mockPeer) IsOutbound() bool         { return false }
-func (mp *mockPeer) IsPersistent() bool       { return true }
-func (mp *mockPeer) Get(s string) interface{} { return s }
-func (mp *mockPeer) Set(string, interface{})  {}
-func (mp *mockPeer) RemoteIP() net.IP         { return mp.ip }
-func (mp *mockPeer) SocketAddr() *NetAddress  { return nil }
-func (mp *mockPeer) RemoteAddr() net.Addr     { return &net.TCPAddr{IP: mp.ip, Port: 8800} }
-func (mp *mockPeer) CloseConn() error         { return nil }
-func (mp *mockPeer) SetRemovalFailed()        {}
-func (mp *mockPeer) GetRemovalFailed() bool   { return false }
+func (mp *mockPeer) FlushStop()            { mp.Stop() } //nolint:errcheck // ignore error
+func (*mockPeer) HasChannel(byte) bool     { return true }
+func (*mockPeer) TrySend(Envelope) bool    { return true }
+func (*mockPeer) Send(Envelope) bool       { return true }
+func (*mockPeer) NodeInfo() ni.NodeInfo    { return ni.Default{} }
+func (*mockPeer) Status() ConnectionStatus { return ConnectionStatus{} }
+func (mp *mockPeer) ID() nodekey.ID        { return mp.id }
+func (*mockPeer) IsOutbound() bool         { return false }
+func (*mockPeer) IsPersistent() bool       { return true }
+func (*mockPeer) Get(s string) any         { return s }
+func (*mockPeer) Set(string, any)          {}
+func (mp *mockPeer) RemoteIP() net.IP      { return mp.ip }
+func (*mockPeer) SocketAddr() *na.NetAddr  { return nil }
+func (mp *mockPeer) RemoteAddr() net.Addr  { return &net.TCPAddr{IP: mp.ip, Port: 8800} }
+func (*mockPeer) Conn() net.Conn           { return nil }
+func (*mockPeer) SetRemovalFailed()        {}
+func (*mockPeer) GetRemovalFailed() bool   { return false }
 
-// Returns a mock peer
+// Returns a mock peer.
 func newMockPeer(ip net.IP) *mockPeer {
 	if ip == nil {
 		ip = net.IP{127, 0, 0, 1}
 	}
-	nodeKey := NodeKey{PrivKey: ed25519.GenPrivKey()}
+	nk := nodekey.NodeKey{PrivKey: ed25519.GenPrivKey()}
 	return &mockPeer{
 		ip: ip,
-		id: nodeKey.ID(),
+		id: nk.ID(),
 	}
 }
 
 func TestPeerSetAddRemoveOne(t *testing.T) {
-	t.Parallel()
-
 	peerSet := NewPeerSet()
 
 	var peerList []Peer
@@ -68,7 +70,7 @@ func TestPeerSetAddRemoveOne(t *testing.T) {
 		assert.True(t, removed)
 		wantSize := n - i - 1
 		for j := 0; j < 2; j++ {
-			assert.Equal(t, false, peerSet.Has(peerAtFront.ID()), "#%d Run #%d: failed to remove peer", i, j)
+			assert.False(t, false, peerSet.Has(peerAtFront.ID()), "#%d Run #%d: failed to remove peer", i, j)
 			assert.Equal(t, wantSize, peerSet.Size(), "#%d Run #%d: failed to remove peer and decrement size", i, j)
 			// Test the route of removing the now non-existent element
 			removed := peerSet.Remove(peerAtFront)
@@ -89,18 +91,17 @@ func TestPeerSetAddRemoveOne(t *testing.T) {
 		peerAtEnd := peerList[i]
 		removed := peerSet.Remove(peerAtEnd)
 		assert.True(t, removed)
-		assert.Equal(t, false, peerSet.Has(peerAtEnd.ID()), "#%d: failed to remove item at end", i)
+		assert.False(t, false, peerSet.Has(peerAtEnd.ID()), "#%d: failed to remove item at end", i)
 		assert.Equal(t, i, peerSet.Size(), "#%d: differing sizes after peerSet.Remove(atEndPeer)", i)
 	}
 }
 
 func TestPeerSetAddRemoveMany(t *testing.T) {
-	t.Parallel()
 	peerSet := NewPeerSet()
 
 	peers := []Peer{}
-	N := 100
-	for i := 0; i < N; i++ {
+	n := 100
+	for i := 0; i < n; i++ {
 		peer := newMockPeer(net.IP{127, 0, 0, byte(i)})
 		if err := peerSet.Add(peer); err != nil {
 			t.Errorf("failed to add new peer")
@@ -124,7 +125,6 @@ func TestPeerSetAddRemoveMany(t *testing.T) {
 }
 
 func TestPeerSetAddDuplicate(t *testing.T) {
-	t.Parallel()
 	peerSet := NewPeerSet()
 	peer := newMockPeer(nil)
 
@@ -164,8 +164,6 @@ func TestPeerSetAddDuplicate(t *testing.T) {
 }
 
 func TestPeerSetGet(t *testing.T) {
-	t.Parallel()
-
 	var (
 		peerSet = NewPeerSet()
 		peer    = newMockPeer(nil)
@@ -185,7 +183,7 @@ func TestPeerSetGet(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			have, want := peerSet.Get(peer.ID()), peer
-			assert.Equal(t, have, want, "%d: have %v, want %v", i, have, want)
+			assert.Equal(t, want, have, "%d: have %v, want %v", i, want, have)
 		}(i)
 	}
 	wg.Wait()

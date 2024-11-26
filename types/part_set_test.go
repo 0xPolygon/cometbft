@@ -1,6 +1,7 @@
 package types
 
 import (
+	"fmt"
 	"io"
 	"testing"
 
@@ -8,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/cometbft/cometbft/crypto/merkle"
-	cmtrand "github.com/cometbft/cometbft/libs/rand"
+	cmtrand "github.com/cometbft/cometbft/internal/rand"
 )
 
 const (
@@ -28,6 +29,7 @@ func TestBasicPartSet(t *testing.T) {
 	assert.True(t, partSet.IsComplete())
 	assert.EqualValues(t, nParts, partSet.Count())
 	assert.EqualValues(t, testPartSize*nParts, partSet.ByteSize())
+	assert.False(t, partSet.IsLocked())
 
 	// Test adding parts to a new partSet.
 	partSet2 := NewPartSetFromHeader(partSet.Header())
@@ -44,16 +46,17 @@ func TestBasicPartSet(t *testing.T) {
 	// adding part with invalid index
 	added, err := partSet2.AddPart(&Part{Index: 10000})
 	assert.False(t, added)
-	assert.Error(t, err)
+	require.Error(t, err)
 	// adding existing part
 	added, err = partSet2.AddPart(partSet2.GetPart(0))
 	assert.False(t, added)
-	assert.Nil(t, err)
+	require.NoError(t, err)
 
 	assert.Equal(t, partSet.Hash(), partSet2.Hash())
 	assert.EqualValues(t, nParts, partSet2.Total())
 	assert.EqualValues(t, nParts*testPartSize, partSet.ByteSize())
 	assert.True(t, partSet2.IsComplete())
+	assert.False(t, partSet2.IsLocked())
 
 	// Reconstruct data, assert that they are equal.
 	data2Reader := partSet2.GetReader()
@@ -61,6 +64,16 @@ func TestBasicPartSet(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, data, data2)
+
+	// Test locking
+	partSet2.Lock()
+	assert.True(t, partSet2.IsLocked())
+	partSet2.Lock()
+	assert.True(t, partSet2.IsLocked())
+	partSet2.Unlock()
+	assert.False(t, partSet2.IsLocked())
+	partSet2.Unlock()
+	assert.False(t, partSet2.IsLocked())
 }
 
 func TestWrongProof(t *testing.T) {
@@ -86,6 +99,22 @@ func TestWrongProof(t *testing.T) {
 	if added || err == nil {
 		t.Errorf("expected to fail adding a part with bad bytes.")
 	}
+
+	// Test adding a part with wrong proof index.
+	part = partSet.GetPart(2)
+	part.Proof.Index = 1
+	added, err = partSet2.AddPart(part)
+	if added || err == nil {
+		t.Errorf("expected to fail adding a part with bad proof index.")
+	}
+
+	// Test adding a part with wrong proof total.
+	part = partSet.GetPart(3)
+	part.Proof.Total = int64(partSet.Total() - 1)
+	added, err = partSet2.AddPart(part)
+	if added || err == nil {
+		t.Errorf("expected to fail adding a part with bad proof total.")
+	}
 }
 
 func TestPartSetHeaderValidateBasic(t *testing.T) {
@@ -94,11 +123,10 @@ func TestPartSetHeaderValidateBasic(t *testing.T) {
 		malleatePartSetHeader func(*PartSetHeader)
 		expectErr             bool
 	}{
-		{"Good PartSet", func(psHeader *PartSetHeader) {}, false},
+		{"Good PartSet", func(_ *PartSetHeader) {}, false},
 		{"Invalid Hash", func(psHeader *PartSetHeader) { psHeader.Hash = make([]byte, 1) }, true},
 	}
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.testName, func(t *testing.T) {
 			data := cmtrand.Bytes(testPartSize * 100)
 			ps := NewPartSetFromData(data, testPartSize)
@@ -115,11 +143,21 @@ func TestPartValidateBasic(t *testing.T) {
 		malleatePart func(*Part)
 		expectErr    bool
 	}{
-		{"Good Part", func(pt *Part) {}, false},
+		{"Good Part", func(_ *Part) {}, false},
 		{"Too big part", func(pt *Part) { pt.Bytes = make([]byte, BlockPartSizeBytes+1) }, true},
+		{"Good small last part", func(pt *Part) {
+			pt.Index = 1
+			pt.Bytes = make([]byte, BlockPartSizeBytes-1)
+			pt.Proof.Total = 2
+		}, false},
+		{"Too small inner part", func(pt *Part) {
+			pt.Index = 0
+			pt.Bytes = make([]byte, BlockPartSizeBytes-1)
+			pt.Proof.Total = 2
+		}, true},
 		{"Too big proof", func(pt *Part) {
 			pt.Proof = merkle.Proof{
-				Total:    1,
+				Total:    2,
 				Index:    1,
 				LeafHash: make([]byte, 1024*1024),
 			}
@@ -127,7 +165,6 @@ func TestPartValidateBasic(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.testName, func(t *testing.T) {
 			data := cmtrand.Bytes(testPartSize * 100)
 			ps := NewPartSetFromData(data, testPartSize)
@@ -145,8 +182,10 @@ func TestParSetHeaderProtoBuf(t *testing.T) {
 		expPass bool
 	}{
 		{"success empty", &PartSetHeader{}, true},
-		{"success",
-			&PartSetHeader{Total: 1, Hash: []byte("hash")}, true},
+		{
+			"success",
+			&PartSetHeader{Total: 1, Hash: []byte("hash")}, true,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -162,7 +201,6 @@ func TestParSetHeaderProtoBuf(t *testing.T) {
 }
 
 func TestPartProtoBuf(t *testing.T) {
-
 	proof := merkle.Proof{
 		Total:    1,
 		Index:    1,
@@ -175,8 +213,10 @@ func TestPartProtoBuf(t *testing.T) {
 	}{
 		{"failure empty", &Part{}, false},
 		{"failure nil", nil, false},
-		{"success",
-			&Part{Index: 1, Bytes: cmtrand.Bytes(32), Proof: proof}, true},
+		{
+			"success",
+			&Part{Index: 1, Bytes: cmtrand.Bytes(32), Proof: proof}, true,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -190,5 +230,17 @@ func TestPartProtoBuf(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, tc.ps1, p, tc.msg)
 		}
+	}
+}
+
+func BenchmarkMakePartSet(b *testing.B) {
+	for nParts := 1; nParts <= 5; nParts++ {
+		b.Run(fmt.Sprintf("nParts=%d", nParts), func(b *testing.B) {
+			data := cmtrand.Bytes(testPartSize * nParts)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				NewPartSetFromData(data, testPartSize)
+			}
+		})
 	}
 }

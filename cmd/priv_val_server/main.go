@@ -6,10 +6,9 @@ import (
 	"time"
 
 	"github.com/cometbft/cometbft/crypto/ed25519"
+	cmtnet "github.com/cometbft/cometbft/internal/net"
+	cmtos "github.com/cometbft/cometbft/internal/os"
 	"github.com/cometbft/cometbft/libs/log"
-	cmtnet "github.com/cometbft/cometbft/libs/net"
-	cmtos "github.com/cometbft/cometbft/libs/os"
-
 	"github.com/cometbft/cometbft/privval"
 )
 
@@ -20,8 +19,8 @@ func main() {
 		privValKeyPath   = flag.String("priv-key", "", "priv val key file path")
 		privValStatePath = flag.String("priv-state", "", "priv val state file path")
 
-		logger = log.NewTMLogger(
-			log.NewSyncWriter(os.Stdout),
+		logger = log.NewLogger(
+			os.Stdout,
 		).With("module", "priv_val")
 	)
 	flag.Parse()

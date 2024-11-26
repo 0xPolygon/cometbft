@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"os"
 
+	cmtos "github.com/cometbft/cometbft/internal/os"
 	"github.com/cometbft/cometbft/libs/log"
-	cmtos "github.com/cometbft/cometbft/libs/os"
 	rpcserver "github.com/cometbft/cometbft/rpc/jsonrpc/server"
 	rpctypes "github.com/cometbft/cometbft/rpc/jsonrpc/types"
 )
@@ -26,7 +26,7 @@ type Result struct {
 func main() {
 	var (
 		mux    = http.NewServeMux()
-		logger = log.NewTMLogger(log.NewSyncWriter(os.Stdout))
+		logger = log.NewLogger(os.Stdout)
 	)
 
 	// Stop upon receiving SIGTERM or CTRL-C.
