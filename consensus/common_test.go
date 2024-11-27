@@ -92,6 +92,7 @@ func (vs *validatorStub) signVote(
 	hash []byte,
 	header types.PartSetHeader,
 	voteExtension []byte,
+	nonRpVoteExtension []byte,
 	extEnabled bool,
 ) (*types.Vote, error) {
 	pubKey, err := vs.PrivValidator.GetPubKey()
@@ -107,6 +108,7 @@ func (vs *validatorStub) signVote(
 		ValidatorAddress: pubKey.Address(),
 		ValidatorIndex:   vs.Index,
 		Extension:        voteExtension,
+		NonRpExtension:   nonRpVoteExtension,
 	}
 	v := vote.ToProto()
 	if err = vs.PrivValidator.SignVote(test.DefaultTestChainID, v); err != nil {
@@ -118,14 +120,17 @@ func (vs *validatorStub) signVote(
 		v.Signature = vs.lastVote.Signature
 		v.Timestamp = vs.lastVote.Timestamp
 		v.ExtensionSignature = vs.lastVote.ExtensionSignature
+		v.NonRpExtensionSignature = vs.lastVote.NonRpExtensionSignature
 	}
 
 	vote.Signature = v.Signature
 	vote.Timestamp = v.Timestamp
 	vote.ExtensionSignature = v.ExtensionSignature
+	vote.NonRpExtensionSignature = v.NonRpExtensionSignature
 
 	if !extEnabled {
 		vote.ExtensionSignature = nil
+		vote.NonRpExtensionSignature = nil
 	}
 
 	return vote, err
@@ -133,7 +138,7 @@ func (vs *validatorStub) signVote(
 
 // Sign vote for type/hash/header
 func signVote(vs *validatorStub, voteType cmtproto.SignedMsgType, hash []byte, header types.PartSetHeader, extEnabled bool) *types.Vote {
-	var ext []byte
+	var ext, nonRpExt []byte
 	// Only non-nil precommits are allowed to carry vote extensions.
 	if extEnabled {
 		if voteType != cmtproto.PrecommitType {
@@ -141,9 +146,10 @@ func signVote(vs *validatorStub, voteType cmtproto.SignedMsgType, hash []byte, h
 		}
 		if len(hash) != 0 || !header.IsZero() {
 			ext = []byte("extension")
+			nonRpExt = []byte("non_replay_protected_extension")
 		}
 	}
-	v, err := vs.signVote(voteType, hash, header, ext, extEnabled)
+	v, err := vs.signVote(voteType, hash, header, ext, nonRpExt, extEnabled)
 
 	if err != nil {
 		panic(fmt.Errorf("failed to sign vote: %v", err))
@@ -987,5 +993,6 @@ func signDataIsEqual(v1 *types.Vote, v2 *cmtproto.Vote) bool {
 		v1.Round == v2.Round &&
 		bytes.Equal(v1.ValidatorAddress.Bytes(), v2.GetValidatorAddress()) &&
 		v1.ValidatorIndex == v2.GetValidatorIndex() &&
-		bytes.Equal(v1.Extension, v2.Extension)
+		bytes.Equal(v1.Extension, v2.Extension) &&
+		bytes.Equal(v1.NonRpExtension, v2.NonRpExtension)
 }

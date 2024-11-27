@@ -2123,6 +2123,8 @@ func (cs *State) addVote(vote *types.Vote, peerID p2p.ID) (added bool, err error
 		"cs_height", cs.Height,
 		"extLen", len(vote.Extension),
 		"extSigLen", len(vote.ExtensionSignature),
+		"nrpExtLen", len(vote.NonRpExtension),
+		"nrpExtSigLen", len(vote.NonRpExtensionSignature),
 	)
 
 	if vote.Height < cs.Height || (vote.Height == cs.Height && vote.Round < cs.Round) {
@@ -2217,7 +2219,8 @@ func (cs *State) addVote(vote *types.Vote, peerID p2p.ID) (added bool, err error
 		// TODO punish a peer if it sent a vote with an extension when the feature
 		// is disabled on the network.
 		// https://github.com/tendermint/tendermint/issues/8565
-		if len(vote.Extension) > 0 || len(vote.ExtensionSignature) > 0 {
+		if len(vote.Extension) > 0 || len(vote.ExtensionSignature) > 0 ||
+			len(vote.NonRpExtension) > 0 || len(vote.NonRpExtensionSignature) > 0 {
 			return false, fmt.Errorf("received vote with vote extension for height %v (extensions disabled) from peer ID %s", vote.Height, peerID)
 		}
 	}
@@ -2394,11 +2397,12 @@ func (cs *State) signVote(
 		// if the signedMessage type is for a non-nil precommit, add
 		// VoteExtension
 		if extEnabled {
-			ext, err := cs.blockExec.ExtendVote(context.TODO(), vote, block, cs.state)
+			ext, nonRpExt, err := cs.blockExec.ExtendVote(context.TODO(), vote, block, cs.state)
 			if err != nil {
 				return nil, err
 			}
 			vote.Extension = ext
+			vote.NonRpExtension = nonRpExt
 		}
 	}
 

@@ -173,11 +173,12 @@ message RequestExtendVote {
 // Verify the vote extension
 message RequestVerifyVoteExtension {
   // the hash of the block that this received vote corresponds to
-  bytes hash              = 1;
+  bytes hash                  = 1;
   // the validator that signed the vote extension
-  bytes validator_address = 2;
-  int64 height            = 3;
-  bytes vote_extension    = 4;
+  bytes validator_address     = 2;
+  int64 height                = 3;
+  bytes vote_extension        = 4;
+  bytes non_rp_vote_extension = 5;
 }
 
 message RequestFinalizeBlock {
@@ -332,7 +333,8 @@ message ResponseProcessProposal {
 }
 
 message ResponseExtendVote {
-  bytes vote_extension = 1;
+  bytes vote_extension = 1;   // this extension's signature is replay-protected by CometBFT
+  bytes non_rp_extension = 2; // this extension's signature is _not_ replay-protected by CometBFT
 }
 
 message ResponseVerifyVoteExtension {
@@ -457,6 +459,10 @@ message ExtendedVoteInfo {
   bytes extension_signature = 4;
   // block_id_flag indicates whether the validator voted for a block, nil, or did not vote at all
   tendermint.types.BlockIDFlag block_id_flag = 5;
+  // Non-deterministic non-replay-protected extension provided by the sending validator's application.
+  bytes non_rp_vote_extension = 6;
+  // Signature on non-replay-protected extension created by CometBFT
+  bytes non_rp_extension_signature = 7;
 
   reserved 2; // signed_last_block
 }

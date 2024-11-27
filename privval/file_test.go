@@ -44,7 +44,7 @@ func TestResetValidator(t *testing.T) {
 	voteType := cmtproto.PrevoteType
 	randBytes := cmtrand.Bytes(tmhash.Size)
 	blockID := types.BlockID{Hash: randBytes, PartSetHeader: types.PartSetHeader{}}
-	vote := newVote(privVal.Key.Address, 0, height, round, voteType, blockID, nil)
+	vote := newVote(privVal.Key.Address, 0, height, round, voteType, blockID, nil, nil)
 	err := privVal.SignVote("mychainid", vote.ToProto())
 	assert.NoError(t, err, "expected no error signing vote")
 
@@ -160,7 +160,7 @@ func TestSignVote(t *testing.T) {
 	voteType := cmtproto.PrevoteType
 
 	// sign a vote for first time
-	vote := newVote(privVal.Key.Address, 0, height, round, voteType, block1, nil)
+	vote := newVote(privVal.Key.Address, 0, height, round, voteType, block1, nil, nil)
 	v := vote.ToProto()
 	err := privVal.SignVote("mychainid", v)
 	assert.NoError(err, "expected no error signing vote")
@@ -171,10 +171,10 @@ func TestSignVote(t *testing.T) {
 
 	// now try some bad votes
 	cases := []*types.Vote{
-		newVote(privVal.Key.Address, 0, height, round-1, voteType, block1, nil),   // round regression
-		newVote(privVal.Key.Address, 0, height-1, round, voteType, block1, nil),   // height regression
-		newVote(privVal.Key.Address, 0, height-2, round+4, voteType, block1, nil), // height regression and different round
-		newVote(privVal.Key.Address, 0, height, round, voteType, block2, nil),     // different block
+		newVote(privVal.Key.Address, 0, height, round-1, voteType, block1, nil, nil),   // round regression
+		newVote(privVal.Key.Address, 0, height-1, round, voteType, block1, nil, nil),   // height regression
+		newVote(privVal.Key.Address, 0, height-2, round+4, voteType, block1, nil, nil), // height regression and different round
+		newVote(privVal.Key.Address, 0, height, round, voteType, block2, nil, nil),     // different block
 	}
 
 	for _, c := range cases {
@@ -275,7 +275,7 @@ func TestDifferByTimestamp(t *testing.T) {
 	{
 		voteType := cmtproto.PrevoteType
 		blockID := types.BlockID{Hash: randbytes, PartSetHeader: types.PartSetHeader{}}
-		vote := newVote(privVal.Key.Address, 0, height, round, voteType, blockID, nil)
+		vote := newVote(privVal.Key.Address, 0, height, round, voteType, blockID, nil, nil)
 		v := vote.ToProto()
 		err := privVal.SignVote("mychainid", v)
 		assert.NoError(t, err, "expected no error signing vote")
@@ -314,20 +314,23 @@ func TestVoteExtensionsAreAlwaysSigned(t *testing.T) {
 	voteType := cmtproto.PrecommitType
 
 	// We initially sign this vote without an extension
-	vote1 := newVote(privVal.Key.Address, 0, height, round, voteType, block, nil)
+	vote1 := newVote(privVal.Key.Address, 0, height, round, voteType, block, nil, nil)
 	vpb1 := vote1.ToProto()
 
 	err = privVal.SignVote("mychainid", vpb1)
 	assert.NoError(t, err, "expected no error signing vote")
 	assert.NotNil(t, vpb1.ExtensionSignature)
+	assert.NotNil(t, vpb1.NonRpExtensionSignature)
 
-	vesb1 := types.VoteExtensionSignBytes("mychainid", vpb1)
+	vesb1, venrpsb1 := types.VoteExtensionSignBytes("mychainid", vpb1)
 	assert.True(t, pubKey.VerifySignature(vesb1, vpb1.ExtensionSignature))
+	assert.True(t, pubKey.VerifySignature(venrpsb1, vpb1.NonRpExtensionSignature))
 
 	// We duplicate this vote precisely, including its timestamp, but change
 	// its extension
 	vote2 := vote1.Copy()
 	vote2.Extension = []byte("new extension")
+	vote2.NonRpExtension = []byte("new non-rp extension")
 	vpb2 := vote2.ToProto()
 
 	err = privVal.SignVote("mychainid", vpb2)
@@ -337,9 +340,11 @@ func TestVoteExtensionsAreAlwaysSigned(t *testing.T) {
 	// that validates against the vote extension sign bytes with the new
 	// extension, and does not validate against the vote extension sign bytes
 	// with the old extension.
-	vesb2 := types.VoteExtensionSignBytes("mychainid", vpb2)
+	vesb2, venrpsb2 := types.VoteExtensionSignBytes("mychainid", vpb2)
 	assert.True(t, pubKey.VerifySignature(vesb2, vpb2.ExtensionSignature))
 	assert.False(t, pubKey.VerifySignature(vesb1, vpb2.ExtensionSignature))
+	assert.True(t, pubKey.VerifySignature(venrpsb2, vpb2.NonRpExtensionSignature))
+	assert.False(t, pubKey.VerifySignature(venrpsb1, vpb2.NonRpExtensionSignature))
 
 	// We now manipulate the timestamp of the vote with the extension, as per
 	// TestDifferByTimestamp
@@ -353,13 +358,15 @@ func TestVoteExtensionsAreAlwaysSigned(t *testing.T) {
 	assert.NoError(t, err, "expected no error signing same vote with manipulated timestamp and vote extension")
 	assert.Equal(t, expectedTimestamp, vpb2.Timestamp)
 
-	vesb3 := types.VoteExtensionSignBytes("mychainid", vpb2)
+	vesb3, venrpsb3 := types.VoteExtensionSignBytes("mychainid", vpb2)
 	assert.True(t, pubKey.VerifySignature(vesb3, vpb2.ExtensionSignature))
 	assert.False(t, pubKey.VerifySignature(vesb1, vpb2.ExtensionSignature))
+	assert.True(t, pubKey.VerifySignature(venrpsb3, vpb2.NonRpExtensionSignature))
+	assert.False(t, pubKey.VerifySignature(venrpsb1, vpb2.NonRpExtensionSignature))
 }
 
 func newVote(addr types.Address, idx int32, height int64, round int32,
-	typ cmtproto.SignedMsgType, blockID types.BlockID, extension []byte) *types.Vote {
+	typ cmtproto.SignedMsgType, blockID types.BlockID, extension, nonRpExtension []byte) *types.Vote {
 	return &types.Vote{
 		ValidatorAddress: addr,
 		ValidatorIndex:   idx,
@@ -369,6 +376,7 @@ func newVote(addr types.Address, idx int32, height int64, round int32,
 		Timestamp:        cmttime.Now(),
 		BlockID:          blockID,
 		Extension:        extension,
+		NonRpExtension:   nonRpExtension,
 	}
 }
 

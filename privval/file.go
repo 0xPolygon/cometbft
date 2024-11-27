@@ -323,13 +323,18 @@ func (pv *FilePV) signVote(chainID string, vote *cmtproto.Vote) error {
 	// precommits, the extension signature will always be empty.
 	// Even if the signed over data is empty, we still add the signature
 	var extSig []byte
+	var nonRpExtSig []byte
 	if vote.Type == cmtproto.PrecommitType && !types.ProtoBlockIDIsNil(&vote.BlockID) {
-		extSignBytes := types.VoteExtensionSignBytes(chainID, vote)
+		extSignBytes, nonRpExtSignBytes := types.VoteExtensionSignBytes(chainID, vote)
 		extSig, err = pv.Key.PrivKey.Sign(extSignBytes)
 		if err != nil {
 			return err
 		}
-	} else if len(vote.Extension) > 0 {
+		nonRpExtSig, err = pv.Key.PrivKey.Sign(nonRpExtSignBytes)
+		if err != nil {
+			return err
+		}
+	} else if len(vote.Extension) > 0 || len(vote.NonRpExtension) > 0 {
 		return errors.New("unexpected vote extension - extensions are only allowed in non-nil precommits")
 	}
 
@@ -351,6 +356,7 @@ func (pv *FilePV) signVote(chainID string, vote *cmtproto.Vote) error {
 		}
 
 		vote.ExtensionSignature = extSig
+		vote.NonRpExtensionSignature = nonRpExtSig
 
 		return err
 	}
@@ -363,6 +369,7 @@ func (pv *FilePV) signVote(chainID string, vote *cmtproto.Vote) error {
 	pv.saveSigned(height, round, step, signBytes, sig)
 	vote.Signature = sig
 	vote.ExtensionSignature = extSig
+	vote.NonRpExtensionSignature = nonRpExtSig
 
 	return nil
 }

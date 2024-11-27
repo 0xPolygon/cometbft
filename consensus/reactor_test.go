@@ -382,10 +382,13 @@ func TestSwitchToConsensusVoteExtensions(t *testing.T) {
 			var veHeight int64
 			if testCase.includeExtensions {
 				require.NotNil(t, signedVote.ExtensionSignature)
+				require.NotNil(t, signedVote.NonRpExtensionSignature)
 				veHeight = testCase.storedHeight
 			} else {
 				require.Nil(t, signedVote.Extension)
 				require.Nil(t, signedVote.ExtensionSignature)
+				require.Nil(t, signedVote.NonRpExtension)
+				require.Nil(t, signedVote.NonRpExtensionSignature)
 			}
 
 			added, err := voteSet.AddVote(signedVote)
