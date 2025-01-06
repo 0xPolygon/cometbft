@@ -498,7 +498,8 @@ func (app *Application) ExtendVote(_ context.Context, req *abci.RequestExtendVot
 	}
 
 	ext = ext[:extLen]
-	nonRpExt := fmt.Sprintf("%d|%x", req.Height, ext) // We include the height as a basic replay protection mechanism
+	// Replay protection mechanism consists of: (a) the randomness of the extension (nonce), and (b) including the height
+	nonRpExt := fmt.Sprintf("%d|%x", req.Height, ext)
 	app.logger.Info("generated vote extension", "num", num, "ext", fmt.Sprintf("%x", ext), "height", appHeight, "nonRpExt", nonRpExt)
 	return &abci.ResponseExtendVote{
 		VoteExtension:  ext,
