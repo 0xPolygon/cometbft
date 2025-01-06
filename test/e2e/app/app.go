@@ -821,7 +821,7 @@ func parseVoteExtensions(expHeight int64, ext, nonRpExt []byte) (int64, error) {
 			height,
 		)
 	}
-	xExt := fmt.Sprintf("%x", ext)
+	xExt := hex.EncodeToString(ext)
 	if parts[1] != xExt {
 		return 0, fmt.Errorf("non replay protected vote extension contains incorrect data (%s!=%s)",
 			xExt,
