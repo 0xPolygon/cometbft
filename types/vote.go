@@ -70,7 +70,7 @@ type Vote struct {
 	ValidatorAddress        Address                `json:"validator_address"`
 	ValidatorIndex          int32                  `json:"validator_index"`
 	Signature               []byte                 `json:"signature"`
-	Extension               []byte                 `json:"extension"` //TODO bernd "Find all refences here"
+	Extension               []byte                 `json:"extension"`
 	ExtensionSignature      []byte                 `json:"extension_signature"`
 	NonRpExtension          []byte                 `json:"non_rp_extension"`
 	NonRpExtensionSignature []byte                 `json:"non_rp_extension_signature"`
