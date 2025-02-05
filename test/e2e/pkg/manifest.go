@@ -52,7 +52,7 @@ type Manifest struct {
 	DisablePexReactor bool `toml:"disable_pex"`
 
 	// KeyType sets the curve that will be used by validators.
-	// Options are ed25519, secp256k1 and bls12381.
+	// Options are ed25519, secp256k1, secp256k1eth and bls12381.
 	KeyType string `toml:"key_type"`
 
 	// Evidence indicates the amount of evidence that will be injected into the
@@ -88,6 +88,7 @@ type Manifest struct {
 	LoadTxConnections int `toml:"load_tx_connections"`
 	LoadMaxSeconds    int `toml:"load_max_seconds"`
 	LoadMaxTxs        int `toml:"load_max_txs"`
+	LoadNumNodesPerTx int `toml:"load_num_nodes_per_tx"`
 
 	// Weight for each lane defined by the app. The transaction loader will
 	// assign lanes to generated transactions proportionally to their weights.
@@ -172,6 +173,9 @@ type Manifest struct {
 	// * An existing validator will be chosen, and its power will alternate between 0 and 1.
 	// * `ConsensusParams` will be flipping on and off key types not set at genesis.
 	ConstantFlip bool `toml:"constant_flip"`
+
+	// PerturbInterval is the time to wait between successive perturbations.
+	PerturbInterval time.Duration `toml:"perturb_interval"`
 }
 
 // ManifestNode represents a node in a testnet manifest.
@@ -198,7 +202,7 @@ type ManifestNode struct {
 	PersistentPeersList []string `toml:"persistent_peers"`
 
 	// Database specifies the database backend: "goleveldb", "rocksdb",
-	// "pebbledb" or "badgerdb". Defaults to "goleveldb".
+	// "pebbledb" or "badgerdb". Defaults to "pebbledb".
 	Database string `toml:"database"`
 
 	// PrivvalProtocolStr specifies the protocol used to sign consensus messages:
