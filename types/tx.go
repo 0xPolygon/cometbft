@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	cmtproto "github.com/cometbft/cometbft/api/cometbft/types/v1"
+	cmtproto "github.com/cometbft/cometbft/api/cometbft/types/v2"
 	"github.com/cometbft/cometbft/crypto/merkle"
 	"github.com/cometbft/cometbft/crypto/tmhash"
 	cmtbytes "github.com/cometbft/cometbft/libs/bytes"
@@ -37,6 +37,10 @@ func (tx Tx) Key() TxKey {
 // String returns the hex-encoded transaction as a string.
 func (tx Tx) String() string {
 	return fmt.Sprintf("Tx{%X}", []byte(tx))
+}
+
+func (txKey TxKey) Hash() []byte {
+	return txKey[:]
 }
 
 // Txs is a slice of Tx.

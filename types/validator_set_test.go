@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	cmtproto "github.com/cometbft/cometbft/api/cometbft/types/v1"
+	cmtproto "github.com/cometbft/cometbft/api/cometbft/types/v2"
 	"github.com/cometbft/cometbft/crypto"
 	"github.com/cometbft/cometbft/crypto/ed25519"
 	"github.com/cometbft/cometbft/crypto/secp256k1"
@@ -1713,6 +1713,10 @@ func TestValidatorSet_AllKeysHaveSameType(t *testing.T) {
 		},
 		{
 			vals:     NewValidatorSet([]*Validator{randValidator(100), NewValidator(secp256k1.GenPrivKey().PubKey(), 200)}),
+			sameType: false,
+		},
+		{
+			vals:     NewValidatorSet([]*Validator{NewValidator(ed25519.GenPrivKey().PubKey(), 200), NewValidator(secp256k1.GenPrivKey().PubKey(), 200)}),
 			sameType: false,
 		},
 	}

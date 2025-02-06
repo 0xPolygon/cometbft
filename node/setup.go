@@ -27,10 +27,10 @@ import (
 	mempl "github.com/cometbft/cometbft/mempool"
 	"github.com/cometbft/cometbft/p2p"
 	na "github.com/cometbft/cometbft/p2p/netaddr"
-	ni "github.com/cometbft/cometbft/p2p/nodeinfo"
-	"github.com/cometbft/cometbft/p2p/nodekey"
 	"github.com/cometbft/cometbft/p2p/pex"
+	"github.com/cometbft/cometbft/p2p/transport"
 	"github.com/cometbft/cometbft/p2p/transport/tcp"
+	tcpconn "github.com/cometbft/cometbft/p2p/transport/tcp/conn"
 	"github.com/cometbft/cometbft/privval"
 	"github.com/cometbft/cometbft/proxy"
 	sm "github.com/cometbft/cometbft/state"
@@ -105,7 +105,7 @@ func DefaultNewNode(
 	cliParams CliParams,
 	keyGenF func() (crypto.PrivKey, error),
 ) (*Node, error) {
-	nodeKey, err := nodekey.LoadOrGen(config.NodeKeyFile())
+	nodeKey, err := p2p.LoadOrGenNodeKey(config.NodeKeyFile())
 	if err != nil {
 		return nil, ErrorLoadOrGenNodeKey{Err: err, NodeKeyFile: config.NodeKeyFile()}
 	}
@@ -410,15 +410,21 @@ func createConsensusReactor(config *cfg.Config,
 
 func createTransport(
 	config *cfg.Config,
-	nodeKey *nodekey.NodeKey,
+	nodeKey *p2p.NodeKey,
 	proxyApp proxy.AppConns,
 ) (
 	*tcp.MultiplexTransport,
 	[]p2p.PeerFilterFunc,
 ) {
+	tcpConfig := tcpconn.DefaultMConnConfig()
+	tcpConfig.FlushThrottle = config.P2P.FlushThrottleTimeout
+	tcpConfig.SendRate = config.P2P.SendRate
+	tcpConfig.RecvRate = config.P2P.RecvRate
+	tcpConfig.MaxPacketMsgPayloadSize = config.P2P.MaxPacketMsgPayloadSize
+	tcpConfig.TestFuzz = config.P2P.TestFuzz
+	tcpConfig.TestFuzzConfig = config.P2P.TestFuzzConfig
 	var (
-		mConnConfig = p2p.MConnConfig(config.P2P)
-		transport   = tcp.NewMultiplexTransport(*nodeKey, mConnConfig)
+		transport   = tcp.NewMultiplexTransport(*nodeKey, tcpConfig)
 		connFilters = []tcp.ConnFilterFunc{}
 		peerFilters = []p2p.PeerFilterFunc{}
 	)
@@ -477,7 +483,7 @@ func createTransport(
 }
 
 func createSwitch(config *cfg.Config,
-	transport p2p.Transport,
+	transport transport.Transport,
 	p2pMetrics *p2p.Metrics,
 	peerFilters []p2p.PeerFilterFunc,
 	mempoolReactor p2p.Reactor,
@@ -485,8 +491,8 @@ func createSwitch(config *cfg.Config,
 	stateSyncReactor *statesync.Reactor,
 	consensusReactor *cs.Reactor,
 	evidenceReactor *evidence.Reactor,
-	nodeInfo ni.NodeInfo,
-	nodeKey *nodekey.NodeKey,
+	nodeInfo p2p.NodeInfo,
+	nodeKey *p2p.NodeKey,
 	p2pLogger log.Logger,
 ) *p2p.Switch {
 	sw := p2p.NewSwitch(
@@ -512,7 +518,7 @@ func createSwitch(config *cfg.Config,
 }
 
 func createAddrBookAndSetOnSwitch(config *cfg.Config, sw *p2p.Switch,
-	p2pLogger log.Logger, nodeKey *nodekey.NodeKey,
+	p2pLogger log.Logger, nodeKey *p2p.NodeKey,
 ) (pex.AddrBook, error) {
 	addrBook := pex.NewAddrBook(config.P2P.AddrBookFile(), config.P2P.AddrBookStrict)
 	addrBook.SetLogger(p2pLogger.With("book", config.P2P.AddrBookFile()))

@@ -6,12 +6,13 @@ import (
 
 	abcicli "github.com/cometbft/cometbft/abci/client"
 	abci "github.com/cometbft/cometbft/abci/types"
-	"github.com/cometbft/cometbft/p2p/nodekey"
+	"github.com/cometbft/cometbft/p2p"
 	"github.com/cometbft/cometbft/types"
 )
 
 const (
-	MempoolChannel = byte(0x30)
+	MempoolChannel        = byte(0x30)
+	MempoolControlChannel = byte(0x31)
 
 	// PeerCatchupSleepIntervalMS defines how much time to sleep if a peer is behind.
 	PeerCatchupSleepIntervalMS = 100
@@ -26,7 +27,7 @@ const (
 type Mempool interface {
 	// CheckTx executes a new transaction against the application to determine
 	// its validity and whether it should be added to the mempool.
-	CheckTx(tx types.Tx, sender nodekey.ID) (*abcicli.ReqRes, error)
+	CheckTx(tx types.Tx, sender p2p.ID) (*abcicli.ReqRes, error)
 
 	// RemoveTxByKey removes a transaction, identified by its key,
 	// from the mempool.
@@ -104,6 +105,9 @@ type Mempool interface {
 
 	// SizeBytes returns the total size of all txs in the mempool.
 	SizeBytes() int64
+
+	// GetSenders returns the list of node IDs from which we receive the given transaction.
+	GetSenders(txKey types.TxKey) ([]p2p.ID, error)
 }
 
 // PreCheckFunc is an optional filter executed before CheckTx and rejects
@@ -153,7 +157,7 @@ func PostCheckMaxGas(maxGas int64) PostCheckFunc {
 // TxKey is the fixed length array key used as an index.
 type TxKey [sha256.Size]byte
 
-// An entry in the mempool.
+// An Entry represents a transaction stored in the mempool.
 type Entry interface {
 	// Tx returns the transaction stored in the entry.
 	Tx() types.Tx
@@ -165,11 +169,15 @@ type Entry interface {
 	GasWanted() int64
 
 	// IsSender returns whether we received the transaction from the given peer ID.
-	IsSender(peerID nodekey.ID) bool
+	IsSender(peerID p2p.ID) bool
+
+	// Senders returns the list of registered peers that sent us the transaction.
+	Senders() []p2p.ID
 }
 
-// An iterator is used to iterate through the mempool entries.
-// Multiple iterators should be allowed to run concurrently.
+// An Iterator is used to iterate through the mempool entries.
+// It allows multiple iterators to run concurrently, enabling
+// parallel processing of mempool entries.
 type Iterator interface {
 	// WaitNextCh returns a channel on which to wait for the next available entry.
 	WaitNextCh() <-chan Entry

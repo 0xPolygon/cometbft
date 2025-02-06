@@ -4,14 +4,16 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	gogo "github.com/cosmos/gogoproto/types"
 
-	cmtproto "github.com/cometbft/cometbft/api/cometbft/types/v1"
+	cmtproto "github.com/cometbft/cometbft/api/cometbft/types/v2"
 	"github.com/cometbft/cometbft/crypto/bls12381"
 	"github.com/cometbft/cometbft/crypto/ed25519"
 	"github.com/cometbft/cometbft/crypto/secp256k1"
+	"github.com/cometbft/cometbft/crypto/secp256k1eth"
 	"github.com/cometbft/cometbft/crypto/tmhash"
 )
 
@@ -25,9 +27,21 @@ const (
 	// MaxBlockPartsCount is the maximum number of block parts.
 	MaxBlockPartsCount = (MaxBlockSizeBytes / BlockPartSizeBytes) + 1
 
-	ABCIPubKeyTypeEd25519   = ed25519.KeyType
-	ABCIPubKeyTypeSecp256k1 = secp256k1.KeyType
-	ABCIPubKeyTypeBls12381  = bls12381.KeyType
+	ABCIPubKeyTypeEd25519      = ed25519.KeyType
+	ABCIPubKeyTypeSecp256k1    = secp256k1.KeyType
+	ABCIPubKeyTypeBls12381     = bls12381.KeyType
+	ABCIPubKeyTypeSecp256k1Eth = secp256k1eth.KeyType
+
+	// MaxMessageDelay is the maximum allowed value for SynchronyParams.MessageDelay.
+	//
+	// It ensures that the SynchronyParams.MessageDelay does not overflow int64.
+	// The 24hr value was chosen based on common sense.
+	MaxMessageDelay = 24 * time.Hour
+	// MaxPrecision is the maximum allowed value for SynchronyParams.Precision.
+	//
+	// It ensures that the SynchronyParams.Precision does not overflow int64. The
+	// 30s value was chosen based on common sense.
+	MaxPrecision = 30 * time.Second
 )
 
 var ABCIPubKeyTypesToNames = map[string]string{
@@ -38,6 +52,10 @@ var ABCIPubKeyTypesToNames = map[string]string{
 func init() {
 	if bls12381.Enabled {
 		ABCIPubKeyTypesToNames[ABCIPubKeyTypeBls12381] = bls12381.PubKeyName
+	}
+
+	if secp256k1eth.Enabled {
+		ABCIPubKeyTypesToNames[ABCIPubKeyTypeSecp256k1Eth] = secp256k1eth.PubKeyName
 	}
 }
 
@@ -117,9 +135,11 @@ func featureEnabled(enableHeight int64, currentHeight int64, f string) bool {
 // These parameters are part of the Proposer-Based Timestamps (PBTS) algorithm.
 // For more information on the relationship of the synchrony parameters to
 // block timestamps validity, refer to the PBTS specification:
-// // https://github.com/cometbft/cometbft/tree/main/spec/consensus/proposer-based-timestamp
+// https://github.com/cometbft/cometbft/tree/main/spec/consensus/proposer-based-timestamp
 type SynchronyParams struct {
-	Precision    time.Duration `json:"precision,string"`
+	// Maximum allowed value: MaxPrecision.
+	Precision time.Duration `json:"precision,string"`
+	// Maximum allowed value: MaxMessageDelay.
 	MessageDelay time.Duration `json:"message_delay,string"`
 }
 
@@ -134,10 +154,20 @@ type SynchronyParams struct {
 // The goal is facilitate the progression of consensus when improper synchrony
 // parameters are set or become insufficient to preserve liveness. Refer to
 // https://github.com/cometbft/cometbft/issues/2184 for more details.
+//
+// There's a cap (MaxMessageDelay) on the MessageDelay to prevent overflow.
 func (sp SynchronyParams) InRound(round int32) SynchronyParams {
+	if round <= 0 {
+		return sp
+	}
+
+	d := time.Duration(math.Min(
+		float64(MaxMessageDelay),
+		math.Pow(1.1, float64(round))*float64(sp.MessageDelay),
+	))
 	return SynchronyParams{
 		Precision:    sp.Precision,
-		MessageDelay: time.Duration(math.Pow(1.1, float64(round)) * float64(sp.MessageDelay)),
+		MessageDelay: d,
 	}
 }
 
@@ -201,13 +231,17 @@ func DefaultSynchronyParams() SynchronyParams {
 	}
 }
 
-func IsValidPubkeyType(params ValidatorParams, pubkeyType string) bool {
-	for i := 0; i < len(params.PubKeyTypes); i++ {
-		if params.PubKeyTypes[i] == pubkeyType {
-			return true
+func IsValidPubkeyType(params ValidatorParams, pubkeyType string) (bool, string) {
+	nKeyTypes := len(params.PubKeyTypes)
+	suppTypes := make([]string, 0, nKeyTypes)
+	for i := 0; i < nKeyTypes; i++ {
+		k := params.PubKeyTypes[i]
+		if k == pubkeyType {
+			return true, ""
 		}
+		suppTypes = append(suppTypes, fmt.Sprintf("%q", k))
 	}
-	return false
+	return false, strings.Join(suppTypes, ", ")
 }
 
 // ValidateBasic validates the ConsensusParams to ensure **all** values are within their
@@ -271,6 +305,12 @@ func (params ConsensusParams) ValidateBasic() error {
 		if params.Synchrony.Precision <= 0 {
 			return fmt.Errorf("synchrony.Precision must be greater than 0. Got: %d",
 				params.Synchrony.Precision)
+		}
+		if params.Synchrony.MessageDelay > MaxMessageDelay {
+			return fmt.Errorf("synchrony.MessageDelay is too big, must be less than or equal to %v", MaxMessageDelay)
+		}
+		if params.Synchrony.Precision > MaxPrecision {
+			return fmt.Errorf("synchrony.Precision is too big, must be less than or equal to %v", MaxPrecision)
 		}
 	}
 

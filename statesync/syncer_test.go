@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	abci "github.com/cometbft/cometbft/abci/types"
-	cmtstate "github.com/cometbft/cometbft/api/cometbft/state/v1"
+	cmtstate "github.com/cometbft/cometbft/api/cometbft/state/v2"
 	ssproto "github.com/cometbft/cometbft/api/cometbft/statesync/v1"
 	cmtversion "github.com/cometbft/cometbft/api/cometbft/version/v1"
 	"github.com/cometbft/cometbft/config"
@@ -18,7 +18,6 @@ import (
 	cmtsync "github.com/cometbft/cometbft/libs/sync"
 	"github.com/cometbft/cometbft/p2p"
 	p2pmocks "github.com/cometbft/cometbft/p2p/mocks"
-	"github.com/cometbft/cometbft/p2p/nodekey"
 	"github.com/cometbft/cometbft/proxy"
 	proxymocks "github.com/cometbft/cometbft/proxy/mocks"
 	sm "github.com/cometbft/cometbft/state"
@@ -48,7 +47,7 @@ func setupOfferSyncer() (*syncer, *proxymocks.AppConnSnapshot) {
 // Sets up a simple peer mock with an ID.
 func simplePeer(id string) *p2pmocks.Peer {
 	peer := &p2pmocks.Peer{}
-	peer.On("ID").Return(nodekey.ID(id))
+	peer.On("ID").Return(p2p.ID(id))
 	return peer
 }
 
@@ -102,7 +101,7 @@ func TestSyncer_SyncAny(t *testing.T) {
 
 	// Adding a couple of peers should trigger snapshot discovery messages
 	peerA := &p2pmocks.Peer{}
-	peerA.On("ID").Return(nodekey.ID("a"))
+	peerA.On("ID").Return(p2p.ID("a"))
 	peerA.On("Send", mock.MatchedBy(func(i any) bool {
 		e, ok := i.(p2p.Envelope)
 		if !ok {
@@ -110,12 +109,12 @@ func TestSyncer_SyncAny(t *testing.T) {
 		}
 		req, ok := e.Message.(*ssproto.SnapshotsRequest)
 		return ok && e.ChannelID == SnapshotChannel && req != nil
-	})).Return(true)
+	})).Return(nil)
 	syncer.AddPeer(peerA)
 	peerA.AssertExpectations(t)
 
 	peerB := &p2pmocks.Peer{}
-	peerB.On("ID").Return(nodekey.ID("b"))
+	peerB.On("ID").Return(p2p.ID("b"))
 	peerB.On("Send", mock.MatchedBy(func(i any) bool {
 		e, ok := i.(p2p.Envelope)
 		if !ok {
@@ -123,7 +122,7 @@ func TestSyncer_SyncAny(t *testing.T) {
 		}
 		req, ok := e.Message.(*ssproto.SnapshotsRequest)
 		return ok && e.ChannelID == SnapshotChannel && req != nil
-	})).Return(true)
+	})).Return(nil)
 	syncer.AddPeer(peerB)
 	peerB.AssertExpectations(t)
 
@@ -184,11 +183,11 @@ func TestSyncer_SyncAny(t *testing.T) {
 	peerA.On("Send", mock.MatchedBy(func(i any) bool {
 		e, ok := i.(p2p.Envelope)
 		return ok && e.ChannelID == ChunkChannel
-	})).Maybe().Run(onChunkRequest).Return(true)
+	})).Maybe().Run(onChunkRequest).Return(nil)
 	peerB.On("Send", mock.MatchedBy(func(i any) bool {
 		e, ok := i.(p2p.Envelope)
 		return ok && e.ChannelID == ChunkChannel
-	})).Maybe().Run(onChunkRequest).Return(true)
+	})).Maybe().Run(onChunkRequest).Return(nil)
 
 	// The first time we're applying chunk 2 we tell it to retry the snapshot and discard chunk 1,
 	// which should cause it to keep the existing chunk 0 and 2, and restart restoration from
