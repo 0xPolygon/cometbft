@@ -13,7 +13,7 @@ ENV COMETBFT_BUILD_OPTIONS badgerdb,rocksdb,clock_skew,bls12381
 WORKDIR /src/cometbft
 
 # Fetch dependencies separately (for layer caching)
-COPY go.mod go.sum api/go.mod api/go.sum ./
+COPY go.mod go.sum ./
 RUN go mod download
 
 # Build CometBFT and install into /usr/bin/cometbft
