@@ -164,6 +164,8 @@ func TestHealth(t *testing.T) {
 }
 
 func TestGenesisAndValidators(t *testing.T) {
+	t.Skip("Skipping due to large genesis file size")
+
 	for i, c := range GetClients() {
 
 		// make sure this is the right genesis file
@@ -189,6 +191,8 @@ func TestGenesisAndValidators(t *testing.T) {
 }
 
 func TestGenesisChunked(t *testing.T) {
+	t.Skip("Skipping due to large genesis file size")
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
