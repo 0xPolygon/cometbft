@@ -5,8 +5,12 @@ FROM cometbft/cometbft-db-testing:v0.14.3
 
 RUN apt-get -qq update -y && apt-get -qq upgrade -y >/dev/null
 
+# Ensure the container uses the correct Go toolchain for go.mod
+# (resolves: go.mod requires go >= 1.23.12 but base image has 1.22.x)
+ENV GOTOOLCHAIN=go1.23.12+auto
+
 # Set up build directory /src/cometbft
-ENV COMETBFT_BUILD_OPTIONS badgerdb,boltdb,cleveldb,rocksdb
+ENV COMETBFT_BUILD_OPTIONS=badgerdb,boltdb,cleveldb,rocksdb
 WORKDIR /src/cometbft
 
 # Fetch dependencies separately (for layer caching)
@@ -24,7 +28,7 @@ RUN cd test/e2e && make node && cp build/node /usr/bin/app
 WORKDIR /cometbft
 VOLUME /cometbft
 ENV CMTHOME=/cometbft
-ENV GORACE "halt_on_error=1"
+ENV GORACE=halt_on_error=1
 
 EXPOSE 26656 26657 26660 6060
 ENTRYPOINT ["/usr/bin/entrypoint"]
