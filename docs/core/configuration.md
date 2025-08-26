@@ -223,6 +223,11 @@ tls_key_file = ""
 # pprof listen address (https://golang.org/pkg/net/http/pprof)
 pprof_laddr = ""
 
+# TODO add this also in the default configs for heimdall-v2 repo
+
+# Enable/disable consensus endpoints which are only meant for debugging
+enable_consensus_endpoints = false
+
 #######################################################
 ###           P2P Configuration Options             ###
 #######################################################

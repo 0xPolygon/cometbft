@@ -265,6 +265,9 @@ tls_key_file = "{{ .RPC.TLSKeyFile }}"
 # pprof listen address (https://golang.org/pkg/net/http/pprof)
 pprof_laddr = "{{ .RPC.PprofListenAddress }}"
 
+# EnableConsensusEndpoints enables consensus related endpoints which are only meant for debugging
+enable_consensus_endpoints = "{{ .RPC.EnableConsensusEndpoints }}"
+
 #######################################################
 ###           P2P Configuration Options             ###
 #######################################################
@@ -357,8 +360,8 @@ type = "flood"
 recheck = {{ .Mempool.Recheck }}
 
 # recheck_timeout is the time the application has during the rechecking process
-# to return CheckTx responses, once all requests have been sent. Responses that 
-# arrive after the timeout expires are discarded. It only applies to 
+# to return CheckTx responses, once all requests have been sent. Responses that
+# arrive after the timeout expires are discarded. It only applies to
 # non-local ABCI clients and when recheck is enabled.
 #
 # The ideal value will strongly depend on the application. It could roughly be estimated as the

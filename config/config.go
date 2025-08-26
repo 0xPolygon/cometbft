@@ -427,6 +427,9 @@ type RPCConfig struct {
 	// pprof listen address (https://golang.org/pkg/net/http/pprof)
 	// FIXME: This should be moved under the instrumentation section
 	PprofListenAddress string `mapstructure:"pprof_laddr"`
+
+	// enable/disable dump_consensus_state and consensus_state endpoints
+	EnableConsensusEndpoints bool `mapstructure:"enable_consensus_endpoints"`
 }
 
 // DefaultRPCConfig returns a default configuration for the RPC server
@@ -454,6 +457,8 @@ func DefaultRPCConfig() *RPCConfig {
 
 		TLSCertFile: "",
 		TLSKeyFile:  "",
+
+		EnableConsensusEndpoints: false, // dump_consensus_state and consensus_state endpoints disabled by default
 	}
 }
 
@@ -463,6 +468,7 @@ func TestRPCConfig() *RPCConfig {
 	cfg.ListenAddress = "tcp://127.0.0.1:36657"
 	cfg.GRPCListenAddress = "tcp://127.0.0.1:36658"
 	cfg.Unsafe = true
+	cfg.EnableConsensusEndpoints = true
 	return cfg
 }
 

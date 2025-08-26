@@ -90,6 +90,7 @@ With the `inspect` server running, you can access RPC endpoints that are critica
 for debugging.
 Calling the `/status`, `/consensus_state` and `/dump_consensus_state` RPC endpoint
 will return useful information about the CometBFT consensus state.
+`/consensus_state` and `/dump_consensus_state` RPC endpoints can be enabled/disable via `rpc.enable_consensus_endpoints`
 
 To start the `inspect` process, run
 ```bash

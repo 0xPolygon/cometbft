@@ -1,6 +1,8 @@
 package core
 
 import (
+	"errors"
+
 	cm "github.com/cometbft/cometbft/consensus"
 	cmtmath "github.com/cometbft/cometbft/libs/math"
 	ctypes "github.com/cometbft/cometbft/rpc/core/types"
@@ -53,7 +55,10 @@ func (env *Environment) Validators(
 // DumpConsensusState dumps consensus state.
 // UNSTABLE
 // More: https://docs.cometbft.com/v0.38.x/rpc/#/Info/dump_consensus_state
-func (env *Environment) DumpConsensusState(*rpctypes.Context) (*ctypes.ResultDumpConsensusState, error) {
+func (env *Environment) DumpConsensusState(_ *rpctypes.Context) (*ctypes.ResultDumpConsensusState, error) {
+	if !env.Config.EnableConsensusEndpoints {
+		return nil, errors.New("method DumpConsensusState not enabled, please check your RPC.EnableConsensusEndpoints under config.toml file")
+	}
 	// Get Peer consensus states.
 	peers := env.P2PPeers.Peers().List()
 	peerStates := make([]ctypes.PeerStateInfo, len(peers))
@@ -84,10 +89,13 @@ func (env *Environment) DumpConsensusState(*rpctypes.Context) (*ctypes.ResultDum
 	}, nil
 }
 
-// ConsensusState returns a concise summary of the consensus state.
+// GetConsensusState returns a concise summary of the consensus state.
 // UNSTABLE
 // More: https://docs.cometbft.com/v0.38.x/rpc/#/Info/consensus_state
-func (env *Environment) GetConsensusState(*rpctypes.Context) (*ctypes.ResultConsensusState, error) {
+func (env *Environment) GetConsensusState(_ *rpctypes.Context) (*ctypes.ResultConsensusState, error) {
+	if !env.Config.EnableConsensusEndpoints {
+		return nil, errors.New("method GetConsensusState not enabled, please check your RPC.EnableConsensusEndpoints under config.toml file")
+	}
 	// Get self round state.
 	bz, err := env.ConsensusState.GetRoundStateSimpleJSON()
 	return &ctypes.ResultConsensusState{RoundState: bz}, err
