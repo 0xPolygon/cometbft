@@ -306,6 +306,8 @@ func (store dbStore) Bootstrap(state State) error {
 // encoding not preserving ordering: https://github.com/tendermint/tendermint/issues/4567
 // This will cause some old states to be left behind when doing incremental partial prunes,
 // specifically older checkpoints and LastHeightChanged targets.
+//
+//nolint:staticcheck
 func (store dbStore) PruneStates(from int64, to int64, evidenceThresholdHeight int64) (uint64, error) {
 	if from <= 0 || to <= 0 {
 		return 0, fmt.Errorf("from height %v and to height %v must be greater than 0", from, to)
@@ -499,11 +501,15 @@ func (store dbStore) PruneABCIResponses(targetRetainHeight int64, forceCompact b
 	// and they are pruned only when instructed by the data companion (which does not exist here)
 	// When we do want to enfore pruning of the results with state pruning then
 	// we can also check store.Compact
+	//nolint:staticcheck
 	if forceCompact || store.StoreOptions.Compact {
+		//nolint:staticcheck
 		store.StoreStateKeeper.ResultsToCompact += uint64(pruned + batchPruned)
+		//nolint:staticcheck
 		if store.StoreStateKeeper.ResultsToCompact >= (uint64)(store.StoreOptions.CompactionInterval) {
 			err = store.db.Compact(nil, nil)
 			if err == nil {
+				//nolint:staticcheck
 				store.StoreStateKeeper.ResultsToCompact = 0
 			}
 		}
