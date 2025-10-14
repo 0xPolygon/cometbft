@@ -320,6 +320,15 @@ func (conR *Reactor) Receive(e p2p.Envelope) {
 		}
 		switch msg := msg.(type) {
 		case *ProposalMessage:
+			conR.conS.mtx.RLock()
+			maxBytes := conR.conS.state.ConsensusParams.Block.MaxBytes
+			conR.conS.mtx.RUnlock()
+			if err := msg.Proposal.ValidateBlockSize(maxBytes); err != nil {
+				conR.Logger.Error("Rejecting oversized proposal", "peer", e.Src, "height", msg.Proposal.Height)
+				conR.Switch.StopPeerForError(e.Src, ErrProposalTooManyParts)
+				return
+			}
+
 			ps.SetHasProposal(msg.Proposal)
 			conR.conS.peerMsgQueue <- msgInfo{msg, e.Src.ID()}
 		case *ProposalPOLMessage:
@@ -795,13 +804,14 @@ OUTER_LOOP:
 			}
 		}
 
-		if sleeping == 0 {
+		switch sleeping {
+		case 0:
 			// We sent nothing. Sleep...
 			sleeping = 1
 			logger.Debug("No votes to send, sleeping", "rs.Height", rs.Height, "prs.Height", prs.Height,
 				"localPV", rs.Votes.Prevotes(rs.Round).BitArray(), "peerPV", prs.Prevotes,
 				"localPC", rs.Votes.Precommits(rs.Round).BitArray(), "peerPC", prs.Precommits)
-		} else if sleeping == 2 {
+		case 2:
 			// Continued sleep...
 			sleeping = 1
 		}
@@ -1338,7 +1348,8 @@ func (ps *PeerState) EnsureVoteBitArrays(height int64, numValidators int) {
 }
 
 func (ps *PeerState) ensureVoteBitArrays(height int64, numValidators int) {
-	if ps.PRS.Height == height {
+	switch ps.PRS.Height {
+	case height:
 		if ps.PRS.Prevotes == nil {
 			ps.PRS.Prevotes = bits.NewBitArray(numValidators)
 		}
@@ -1351,7 +1362,7 @@ func (ps *PeerState) ensureVoteBitArrays(height int64, numValidators int) {
 		if ps.PRS.ProposalPOL == nil {
 			ps.PRS.ProposalPOL = bits.NewBitArray(numValidators)
 		}
-	} else if ps.PRS.Height == height+1 {
+	case height + 1:
 		if ps.PRS.LastCommit == nil {
 			ps.PRS.LastCommit = bits.NewBitArray(numValidators)
 		}
@@ -1717,6 +1728,12 @@ type ProposalMessage struct {
 // ValidateBasic performs basic validation.
 func (m *ProposalMessage) ValidateBasic() error {
 	return m.Proposal.ValidateBasic()
+}
+
+// ValidateBlockSize validates the proposals block size against a maximum. If
+// -1 is passed, types.MaxBlockSizeBytes will be used as the maximum.
+func (m *ProposalMessage) ValidateBlockSize(maxBlockSizeBytes int64) error {
+	return m.Proposal.ValidateBlockSize(maxBlockSizeBytes)
 }
 
 // String returns a string representation.
