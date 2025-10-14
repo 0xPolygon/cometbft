@@ -1,4 +1,6 @@
 name: docker-build-cometbft
+permissions:
+  contents: read
 
 permissions:
   contents: read

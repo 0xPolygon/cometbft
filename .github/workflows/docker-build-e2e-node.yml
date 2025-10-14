@@ -1,5 +1,8 @@
 name: docker-build-e2e-node
 
+permissions:
+  contents: read
+
 on:
   workflow_dispatch:
   push:
