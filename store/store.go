@@ -432,6 +432,13 @@ func (bs *BlockStore) PruneBlocks(height int64, state sm.State) (uint64, int64, 
 
 		}
 
+		if h < evidencePoint {
+			if err := batch.Delete(calcExtCommitKey(h)); err != nil {
+				return 0, -1, err
+			}
+			bs.blockExtendedCommitCache.Remove(h)
+		}
+
 		for p := 0; p < int(meta.BlockID.PartSetHeader.Total); p++ {
 			if err := batch.Delete(calcBlockPartKey(h, p)); err != nil {
 				return 0, -1, err

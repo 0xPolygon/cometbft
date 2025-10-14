@@ -95,7 +95,7 @@ func (vs *validatorStub) signVote(
 	nonRpVoteExtension []byte,
 	extEnabled bool,
 ) (*types.Vote, error) {
-	pubKey, err := vs.PrivValidator.GetPubKey()
+	pubKey, err := vs.GetPubKey()
 	if err != nil {
 		return nil, fmt.Errorf("can't get pubkey: %w", err)
 	}
@@ -111,7 +111,7 @@ func (vs *validatorStub) signVote(
 		NonRpExtension:   nonRpVoteExtension,
 	}
 	v := vote.ToProto()
-	if err = vs.PrivValidator.SignVote(test.DefaultTestChainID, v); err != nil {
+	if err = vs.SignVote(test.DefaultTestChainID, v); err != nil {
 		return nil, fmt.Errorf("sign vote failed: %w", err)
 	}
 
