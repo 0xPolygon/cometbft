@@ -10,6 +10,44 @@ import (
 	dbm "github.com/cometbft/cometbft-db"
 )
 
+const (
+	MaxCompactionInterval = 100000
+)
+
+// KeyFunc maps an integer (e.g., block height) to a DB key.
+type KeyFunc func(int64) []byte
+
+// CompactIntSharded compacts the integer interval [start, end) in shards of size <= maxSpan,
+// calling CompactAndLog for each shard using keyFn to map integers to keys.
+func CompactIntSharded(db dbm.DB, start, end, maxSpan int64, keyFn KeyFunc, label string) error {
+	if keyFn == nil {
+		return fmt.Errorf("keyFn must not be nil")
+	}
+	if maxSpan <= 0 {
+		return fmt.Errorf("maxSpan must be > 0")
+	}
+	if start >= end {
+		// nothing to compact
+		return nil
+	}
+
+	allStart := time.Now()
+	for s := start; s < end; s += maxSpan {
+		e := s + maxSpan
+		if e > end {
+			e = end
+		}
+
+		shardLabel := fmt.Sprintf("%s [%d,%d)", label, s, e)
+		if err := CompactAndLog(db, keyFn(s), keyFn(e), shardLabel); err != nil {
+			return err
+		}
+	}
+	log.Printf("compaction %s ALL SHARDS DONE in %s (range [%d,%d), maxSpan=%d)",
+		label, time.Since(allStart), start, end, maxSpan)
+	return nil
+}
+
 // CompactPrefixSharded16 shards a given ASCII prefix into 16 ranges by the
 // first byte *after* the prefix, then compacts each shard.
 // For prefix "BH:", shards are:

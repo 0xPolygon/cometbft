@@ -470,15 +470,18 @@ func (bs *BlockStore) PruneBlocks(height int64, state sm.State) (uint64, int64, 
 	}
 	bs.blocksDeleted += int64(pruned)
 
-	if bs.compact && bs.blocksDeleted >= bs.compactionInterval {
-		db.CompactAndLog(bs.db, calcBlockMetaKey(bs.startHeightToCompact), calcBlockMetaKey(endHeight), "prune blocks")
-		db.CompactPrefixSharded16(bs.db, "BH:", "prune blocks") //BlockHashKeyRange
-		db.CompactAndLog(bs.db, calcBlockCommitKey(bs.startHeightToCompact), calcBlockCommitKey(endHeight), "prune blocks")
-		db.CompactAndLog(bs.db, calcExtCommitKey(bs.startHeightToCompact), calcExtCommitKey(endHeight), "prune blocks")
-		db.CompactAndLog(bs.db, calcSeenCommitKey(bs.startHeightToCompact), calcSeenCommitKey(endHeight), "prune blocks")
-		db.CompactAndLog(bs.db, calcExtCommitKey(bs.startHeightToCompact), calcExtCommitKey(endHeight), "prune blocks")
-		db.CompactAndLog(bs.db, calcBlockPartKey(bs.startHeightToCompact, 0), calcBlockPartKey(endHeight+1, 0), "prune blocks") // +1 to fit all partIndex
+	blockPartKey0 := func(h int64) []byte {
+		return calcBlockPartKey(h, 0)
+	}
 
+	if bs.compact && bs.blocksDeleted >= bs.compactionInterval {
+		db.CompactPrefixSharded16(bs.db, "BH:", "blockHashKeyRange on prune blocks") //BlockHashKeyRange
+		db.CompactIntSharded(bs.db, bs.startHeightToCompact, endHeight, db.MaxCompactionInterval, calcBlockMetaKey, "calcBlockMetaKey on prune blocks")
+		db.CompactIntSharded(bs.db, bs.startHeightToCompact, endHeight, db.MaxCompactionInterval, calcBlockCommitKey, "calcBlockCommitKey on prune blocks")
+		db.CompactIntSharded(bs.db, bs.startHeightToCompact, endHeight, db.MaxCompactionInterval, calcExtCommitKey, "calcExtCommitKey on prune blocks")
+		db.CompactIntSharded(bs.db, bs.startHeightToCompact, endHeight, db.MaxCompactionInterval, calcSeenCommitKey, "calcSeenCommitKey on prune blocks")
+		db.CompactIntSharded(bs.db, bs.startHeightToCompact, endHeight, db.MaxCompactionInterval, calcExtCommitKey, "calcExtCommitKey on prune blocks")
+		db.CompactIntSharded(bs.db, bs.startHeightToCompact, endHeight+1, db.MaxCompactionInterval, blockPartKey0, "blockPartKey0 on prune blocks")
 		bs.blocksDeleted = 0
 	}
 	return pruned, evidencePoint, err
