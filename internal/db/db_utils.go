@@ -10,29 +10,73 @@ import (
 	dbm "github.com/cometbft/cometbft-db"
 )
 
-func CompactSharded16(db dbm.DB, label string) error {
+// CompactPrefixSharded16 shards a given ASCII prefix into 16 ranges by the
+// first byte *after* the prefix, then compacts each shard.
+// For prefix "BH:", shards are:
+// ["BH:\x00","BH:\x10"), ["BH:\x10","BH:\x20"), …, ["BH:\xF0","BH;")
+func CompactPrefixSharded16(db dbm.DB, prefix string, label string) error {
 	startAll := time.Now()
+	p := []byte(prefix)
+	if len(p) == 0 {
+		return fmt.Errorf("prefix must be non-empty")
+	}
+
 	for b := 0x00; b <= 0xF0; b += 0x10 {
-		start := []byte{byte(b)}
+		start := append(append([]byte{}, p...), byte(b))
+
 		var end []byte
 		if b == 0xF0 {
-			end = nil // nil = ∞ per prettyKey; last shard runs to end-of-keyspace
+			// end of the prefix space: increment ':' (0x3A) to ';' (0x3B)
+			// so every key with "BH:" prefix compares < "BH;"
+			end = []byte(prefix)
+			end[len(end)-1]++ // ':' -> ';'
 		} else {
-			end = []byte{byte(b + 0x10)}
+			end = append(append([]byte{}, p...), byte(b+0x10))
 		}
 
-		// Nice per-shard label, e.g. "kv shard 00-10" … "kv shard f0-∞"
+		// Nice label: e.g. `prune BH: 00-10`, ..., `prune BH: f0-;`
 		var shardLabel string
-		if end == nil {
-			shardLabel = fmt.Sprintf("%s shard %02x-∞", label, b)
+		if b == 0xF0 {
+			shardLabel = fmt.Sprintf("%s %s %02x-;", label, prefix, b)
 		} else {
-			shardLabel = fmt.Sprintf("%s shard %02x-%02x", label, b, b+0x10)
+			shardLabel = fmt.Sprintf("%s %s %02x-%02x", label, prefix, b, b+0x10)
 		}
 
 		if err := CompactAndLog(db, start, end, shardLabel); err != nil {
 			return err
 		}
 	}
+
+	log.Printf("compaction %s prefix %q ALL SHARDS DONE in %s", label, prefix, time.Since(startAll))
+	return nil
+}
+
+// CompactSharded256 compacts the DB into 256 ranges:
+// [0x00,0x01), [0x01,0x02), …, [0xFE,0xFF), [0xFF,∞)
+func CompactSharded256(db dbm.DB, label string) error {
+	startAll := time.Now()
+
+	for b := 0; b < 256; b++ {
+		start := []byte{byte(b)}
+		var end []byte
+		if b < 255 {
+			end = []byte{byte(b + 1)}
+		} else {
+			end = nil // nil = ∞ (end-of-keyspace)
+		}
+
+		var shardLabel string
+		if end == nil {
+			shardLabel = fmt.Sprintf("%s shard %02x-∞", label, b)
+		} else {
+			shardLabel = fmt.Sprintf("%s shard %02x-%02x", label, b, b+1)
+		}
+
+		if err := CompactAndLog(db, start, end, shardLabel); err != nil {
+			return err
+		}
+	}
+
 	log.Printf("compaction %s ALL SHARDS DONE in %s", label, time.Since(startAll))
 	return nil
 }

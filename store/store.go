@@ -472,7 +472,7 @@ func (bs *BlockStore) PruneBlocks(height int64, state sm.State) (uint64, int64, 
 
 	if bs.compact && bs.blocksDeleted >= bs.compactionInterval {
 		db.CompactAndLog(bs.db, calcBlockMetaKey(bs.startHeightToCompact), calcBlockMetaKey(endHeight), "prune blocks")
-		db.CompactAndLog(bs.db, []byte("BH:"), []byte("BH;"), "prune blocks") //BlockHashKeyRange
+		db.CompactPrefixSharded16(bs.db, "BH:", "prune blocks") //BlockHashKeyRange
 		db.CompactAndLog(bs.db, calcBlockCommitKey(bs.startHeightToCompact), calcBlockCommitKey(endHeight), "prune blocks")
 		db.CompactAndLog(bs.db, calcExtCommitKey(bs.startHeightToCompact), calcExtCommitKey(endHeight), "prune blocks")
 		db.CompactAndLog(bs.db, calcSeenCommitKey(bs.startHeightToCompact), calcSeenCommitKey(endHeight), "prune blocks")

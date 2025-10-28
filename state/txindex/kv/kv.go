@@ -186,7 +186,7 @@ func (txi *TxIndex) Prune(retainHeight int64) (int64, int64, error) {
 	txi.totalPrunedHeights += int64(deleted)
 
 	if txi.compact && txi.totalPrunedHeights >= txi.compactionInterval {
-		db.CompactSharded16(txi.store, "txindex prune")
+		db.CompactSharded256(txi.store, "txindex prune")
 		txi.totalPrunedHeights = 0
 	}
 
