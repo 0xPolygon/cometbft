@@ -10,6 +10,33 @@ import (
 	dbm "github.com/cometbft/cometbft-db"
 )
 
+func CompactSharded16(db dbm.DB, label string) error {
+	startAll := time.Now()
+	for b := 0x00; b <= 0xF0; b += 0x10 {
+		start := []byte{byte(b)}
+		var end []byte
+		if b == 0xF0 {
+			end = nil // nil = ∞ per prettyKey; last shard runs to end-of-keyspace
+		} else {
+			end = []byte{byte(b + 0x10)}
+		}
+
+		// Nice per-shard label, e.g. "kv shard 00-10" … "kv shard f0-∞"
+		var shardLabel string
+		if end == nil {
+			shardLabel = fmt.Sprintf("%s shard %02x-∞", label, b)
+		} else {
+			shardLabel = fmt.Sprintf("%s shard %02x-%02x", label, b, b+0x10)
+		}
+
+		if err := CompactAndLog(db, start, end, shardLabel); err != nil {
+			return err
+		}
+	}
+	log.Printf("compaction %s ALL SHARDS DONE in %s", label, time.Since(startAll))
+	return nil
+}
+
 // CompactAndLog compacts [start, limit) and logs the range and duration.
 func CompactAndLog(db dbm.DB, start, limit []byte, label string) error {
 	rng := fmt.Sprintf("[%s, %s)", prettyKey(start), prettyKey(limit))

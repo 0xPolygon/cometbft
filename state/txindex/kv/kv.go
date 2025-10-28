@@ -51,7 +51,6 @@ type TxIndex struct {
 	totalPrunedHeights int64
 	compact            bool
 	compactionInterval int64
-	startKeyToCompact  []byte
 }
 
 type TxIndexerOption func(*TxIndex)
@@ -145,9 +144,6 @@ func (txi *TxIndex) Prune(retainHeight int64) (int64, int64, error) {
 
 	batch2 := txi.store.NewBatch()
 	deleted = 0
-	var startKey []byte
-	var endKey []byte
-	var isTotalPrunedHeightZeroBeforeStart = txi.totalPrunedHeights == 0
 
 	defer closeBatch(batch2)
 	for ; itr.Valid(); itr.Next() {
@@ -165,11 +161,6 @@ func (txi *TxIndex) Prune(retainHeight int64) (int64, int64, error) {
 			if err != nil {
 				return 0, lastRetainHeight, err
 			}
-			if deleted == 0 {
-				startKey = itr.Key()
-			}
-			endKey = itr.Key()
-
 			deleted++
 
 			if deleted%1000 == 0 && deleted != 0 {
@@ -194,12 +185,8 @@ func (txi *TxIndex) Prune(retainHeight int64) (int64, int64, error) {
 	}
 	txi.totalPrunedHeights += int64(deleted)
 
-	if isTotalPrunedHeightZeroBeforeStart && txi.totalPrunedHeights > 0 {
-		txi.startKeyToCompact = startKey
-	}
-
 	if txi.compact && txi.totalPrunedHeights >= txi.compactionInterval {
-		db.CompactAndLog(txi.store, txi.startKeyToCompact, endKey, "txindex prune")
+		db.CompactSharded16(txi.store, "txindex prune")
 		txi.totalPrunedHeights = 0
 	}
 
