@@ -10,6 +10,7 @@ import (
 	dbm "github.com/cometbft/cometbft-db"
 
 	abci "github.com/cometbft/cometbft/abci/types"
+	"github.com/cometbft/cometbft/internal/db"
 	cmtmath "github.com/cometbft/cometbft/libs/math"
 	cmtos "github.com/cometbft/cometbft/libs/os"
 	cmtstate "github.com/cometbft/cometbft/proto/tendermint/state"
@@ -114,9 +115,11 @@ type dbStore struct {
 }
 
 type StoreStateKeeper struct {
-	ResultsToCompact uint64
+	ResultsToCompact           uint64
+	StartResultHeightToCompact int64
 
-	StatesToCompact uint64
+	StatesToCompact           uint64
+	StartStateHeightToCompact int64
 }
 type StoreOptions struct {
 	// DiscardABCIResponses determines whether or not the store
@@ -339,6 +342,9 @@ func (store dbStore) PruneStates(from int64, to int64, evidenceThresholdHeight i
 	defer batch.Close()
 	pruned := uint64(0)
 
+	startHeight := from
+	endHeight := to - 1
+
 	// We have to delete in reverse order, to avoid deleting previous heights that have validator
 	// sets and consensus params that we may need to retrieve.
 	for h := to - 1; h >= from; h-- {
@@ -436,15 +442,17 @@ func (store dbStore) PruneStates(from int64, to int64, evidenceThresholdHeight i
 
 	// We do not want to panic or interrupt consensus on compaction failure
 	if store.StoreOptions.Compact {
+		if store.StoreStateKeeper.StatesToCompact == 0 && pruned > 0 {
+			store.StoreStateKeeper.StartStateHeightToCompact = startHeight
+		}
 		store.StoreStateKeeper.StatesToCompact += pruned
 		if store.StoreStateKeeper.StatesToCompact >= uint64(store.StoreOptions.CompactionInterval) {
-			// When the range is nil,nil, the database will try to compact
-			// ALL levels. Another option is to set a predefined range of
-			// specific keys.
-			err = store.db.Compact(nil, nil)
-			if err == nil {
-				store.StoreStateKeeper.StatesToCompact = 0
-			}
+			// Spliting Compaction by Key Range
+			db.CompactAndLog(store.db, calcValidatorsKey(store.StoreStateKeeper.StartStateHeightToCompact), calcValidatorsKey(endHeight+1), "state prune")
+			db.CompactAndLog(store.db, calcConsensusParamsKey(store.StoreStateKeeper.StartStateHeightToCompact), calcConsensusParamsKey(endHeight+1), "state prune")
+			db.CompactAndLog(store.db, calcABCIResponsesKey(store.StoreStateKeeper.StartStateHeightToCompact), calcABCIResponsesKey(endHeight+1), "state prune")
+
+			store.StoreStateKeeper.StatesToCompact = 0
 		}
 	}
 
@@ -471,6 +479,9 @@ func (store dbStore) PruneABCIResponses(targetRetainHeight int64, forceCompact b
 
 	pruned := int64(0)
 	batchPruned := int64(0)
+
+	startHeight := lastRetainHeight
+	endHeight := targetRetainHeight - 1
 
 	for h := lastRetainHeight; h < targetRetainHeight; h++ {
 		if err := batch.Delete(calcABCIResponsesKey(h)); err != nil {
@@ -500,18 +511,18 @@ func (store dbStore) PruneABCIResponses(targetRetainHeight int64, forceCompact b
 	// forceCompact was introduced because in main and v1 there is no config to prune ABCI results
 	// and they are pruned only when instructed by the data companion (which does not exist here)
 	// When we do want to enfore pruning of the results with state pruning then
-	// we can also check store.Compact
+	// we can also check db.Compact
 	//nolint:staticcheck
 	if forceCompact || store.StoreOptions.Compact {
+		if store.StoreStateKeeper.ResultsToCompact == 0 && uint64(pruned+batchPruned) > 0 {
+			store.StoreStateKeeper.StartResultHeightToCompact = startHeight
+		}
 		//nolint:staticcheck
 		store.StoreStateKeeper.ResultsToCompact += uint64(pruned + batchPruned)
 		//nolint:staticcheck
 		if store.StoreStateKeeper.ResultsToCompact >= (uint64)(store.StoreOptions.CompactionInterval) {
-			err = store.db.Compact(nil, nil)
-			if err == nil {
-				//nolint:staticcheck
-				store.StoreStateKeeper.ResultsToCompact = 0
-			}
+			db.CompactAndLog(store.db, calcABCIResponsesKey(store.StoreStateKeeper.StartResultHeightToCompact), calcABCIResponsesKey(endHeight+1), "prune abci responses")
+			store.StoreStateKeeper.ResultsToCompact = 0
 		}
 	}
 	return pruned + batchPruned, targetRetainHeight, err

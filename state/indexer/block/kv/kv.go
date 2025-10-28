@@ -16,6 +16,7 @@ import (
 	dbm "github.com/cometbft/cometbft-db"
 
 	abci "github.com/cometbft/cometbft/abci/types"
+	"github.com/cometbft/cometbft/internal/db"
 	idxutil "github.com/cometbft/cometbft/internal/indexer"
 	"github.com/cometbft/cometbft/libs/log"
 	"github.com/cometbft/cometbft/libs/pubsub/query"
@@ -45,6 +46,7 @@ type BlockerIndexer struct {
 	totalPrunedHeights int64
 	compact            bool
 	compactionInterval int64
+	startKeyToCompact  []byte
 }
 
 type BlockIndexerOption func(*BlockerIndexer)
@@ -153,6 +155,9 @@ func (idx *BlockerIndexer) Prune(retainHeight int64) (int64, int64, error) {
 	defer itr.Close()
 
 	deleted := 0
+	var startKey []byte
+	var endKey []byte
+	var isTotalPrunedHeightZeroBeforeStart = idx.totalPrunedHeights == 0
 	affectedHeights := make(map[int64]struct{})
 	for ; itr.Valid(); itr.Next() {
 		if keyBelongsToHeightRange(itr.Key(), lastRetainHeight, retainHeight) {
@@ -162,6 +167,10 @@ func (idx *BlockerIndexer) Prune(retainHeight int64) (int64, int64, error) {
 			}
 			height := getHeightFromKey(itr.Key())
 			affectedHeights[height] = struct{}{}
+			if deleted == 0 {
+				startKey = itr.Key()
+			}
+			endKey = itr.Key()
 			deleted++
 		}
 		if deleted%1000 == 0 && deleted != 0 {
@@ -189,9 +198,13 @@ func (idx *BlockerIndexer) Prune(retainHeight int64) (int64, int64, error) {
 		}
 	}
 
+	if isTotalPrunedHeightZeroBeforeStart && idx.totalPrunedHeights > 0 {
+		idx.startKeyToCompact = startKey
+	}
+
 	if idx.compact && idx.totalPrunedHeights >= idx.compactionInterval {
-		_ = idx.store.Compact(nil, nil)
-		idx.totalPrunedHeights = idx.totalPrunedHeights - idx.compactionInterval
+		db.CompactAndLog(idx.store, idx.startKeyToCompact, endKey, "block indexer")
+		idx.totalPrunedHeights = 0
 	}
 
 	return int64(len(affectedHeights)), retainHeight, err

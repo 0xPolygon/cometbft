@@ -11,6 +11,7 @@ import (
 	dbm "github.com/cometbft/cometbft-db"
 
 	"github.com/cometbft/cometbft/evidence"
+	"github.com/cometbft/cometbft/internal/db"
 	cmtsync "github.com/cometbft/cometbft/libs/sync"
 	cmtstore "github.com/cometbft/cometbft/proto/tendermint/store"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
@@ -61,9 +62,10 @@ type BlockStore struct {
 	blockCommitCache         *lru.Cache[int64, *types.Commit]
 	blockExtendedCommitCache *lru.Cache[int64, *types.ExtendedCommit]
 
-	blocksDeleted      int64
-	compact            bool
-	compactionInterval int64
+	blocksDeleted        int64
+	compact              bool
+	compactionInterval   int64
+	startHeightToCompact int64
 }
 
 type BlockStoreOption func(*BlockStore)
@@ -395,6 +397,8 @@ func (bs *BlockStore) PruneBlocks(height int64, state sm.State) (uint64, int64, 
 	}
 
 	evidencePoint := height
+	startHeight := base
+	endHeight := height - 1
 	for h := base; h < height; h++ {
 
 		meta := bs.LoadBlockMeta(h)
@@ -461,19 +465,21 @@ func (bs *BlockStore) PruneBlocks(height int64, state sm.State) (uint64, int64, 
 	if err != nil {
 		return 0, -1, err
 	}
+	if bs.blocksDeleted == 0 && pruned > 0 {
+		bs.startHeightToCompact = startHeight
+	}
 	bs.blocksDeleted += int64(pruned)
 
 	if bs.compact && bs.blocksDeleted >= bs.compactionInterval {
-		// When the range is nil,nil, the database will try to compact
-		// ALL levels. Another option is to set a predefined range of
-		// specific keys.
-		err = bs.db.Compact(nil, nil)
-		if err == nil {
-			// If there was no error in compaction we reset the counter.
-			// Otherwise we preserve the number of blocks deleted so
-			// we can trigger compaction in the next pruning iteration
-			bs.blocksDeleted = 0
-		}
+		db.CompactAndLog(bs.db, calcBlockMetaKey(bs.startHeightToCompact), calcBlockMetaKey(endHeight), "prune blocks")
+		db.CompactAndLog(bs.db, []byte("BH:"), []byte("BH;"), "prune blocks") //BlockHashKeyRange
+		db.CompactAndLog(bs.db, calcBlockCommitKey(bs.startHeightToCompact), calcBlockCommitKey(endHeight), "prune blocks")
+		db.CompactAndLog(bs.db, calcExtCommitKey(bs.startHeightToCompact), calcExtCommitKey(endHeight), "prune blocks")
+		db.CompactAndLog(bs.db, calcSeenCommitKey(bs.startHeightToCompact), calcSeenCommitKey(endHeight), "prune blocks")
+		db.CompactAndLog(bs.db, calcExtCommitKey(bs.startHeightToCompact), calcExtCommitKey(endHeight), "prune blocks")
+		db.CompactAndLog(bs.db, calcBlockPartKey(bs.startHeightToCompact, 0), calcBlockPartKey(endHeight+1, 0), "prune blocks") // +1 to fit all partIndex
+
+		bs.blocksDeleted = 0
 	}
 	return pruned, evidencePoint, err
 }
