@@ -475,7 +475,7 @@ func (bs *BlockStore) PruneBlocks(height int64, state sm.State) (uint64, int64, 
 	}
 
 	if bs.compact && bs.blocksDeleted >= bs.compactionInterval {
-		db.CompactPrefixSharded16(bs.db, "BH:", "blockHashKeyRange on prune blocks") //BlockHashKeyRange
+		db.CompactPrefixHex256(bs.db, "BH:", "blockHashKeyRange on prune blocks") //BlockHashKeyRange
 		db.CompactIntSharded(bs.db, bs.startHeightToCompact, endHeight, db.MaxCompactionInterval, calcBlockMetaKey, "calcBlockMetaKey on prune blocks")
 		db.CompactIntSharded(bs.db, bs.startHeightToCompact, endHeight, db.MaxCompactionInterval, calcBlockCommitKey, "calcBlockCommitKey on prune blocks")
 		db.CompactIntSharded(bs.db, bs.startHeightToCompact, endHeight, db.MaxCompactionInterval, calcExtCommitKey, "calcExtCommitKey on prune blocks")
