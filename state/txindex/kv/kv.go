@@ -33,6 +33,8 @@ const (
 	tagKeySeparator     = "/"
 	tagKeySeparatorRune = '/'
 	eventSeqSeparator   = "$es$"
+
+	MaxHeightRangeIterationForPrune = 50000
 )
 
 var (
@@ -48,7 +50,7 @@ type TxIndex struct {
 
 	log log.Logger
 
-	totalPrunedHeights int64
+	totalPrunedKeys    int64
 	compact            bool
 	compactionInterval int64
 }
@@ -93,107 +95,111 @@ func (txi *TxIndex) Prune(retainHeight int64) (int64, int64, error) {
 		return nil
 	}
 
-	itr, err := txi.store.Iterator(nil, nil)
-	if err != nil {
-		return 0, lastRetainHeight, err
-	}
-	defer itr.Close()
+	affectedHeights := 0
+	lastCountedHeight := int64(math.MinInt64)
+	var result *abci.TxResult
 
-	deleted := 0
-	affectedHeights := make(map[int64]struct{})
-	txHashesToDelete := make(map[string]struct{})
-	for ; itr.Valid(); itr.Next() {
-		keyHeight, err := extractHeightFromKey(itr.Key())
-		if err != nil {
-			// this is ok as the keys here are not only indexed by height
-			continue
+	for startPruneHeight := lastRetainHeight; startPruneHeight < retainHeight; startPruneHeight += MaxHeightRangeIterationForPrune {
+
+		endPruneHeight := startPruneHeight + MaxHeightRangeIterationForPrune
+		if endPruneHeight > retainHeight {
+			endPruneHeight = retainHeight
 		}
-		if keyHeight < retainHeight {
-			txHashesToDelete[string(itr.Value())] = struct{}{}
-			err := batch.Delete(itr.Key())
-			if err != nil {
-				return 0, lastRetainHeight, err
-			}
-			affectedHeights[keyHeight] = struct{}{}
-			deleted++
+		txi.log.Info("txIndex prune loop", "startPruneHeight", startPruneHeight, "endPruneHeight", endPruneHeight)
+
+		startKey := prefixKeyForHeight(startPruneHeight)
+		endKey := prefixKeyForHeight(endPruneHeight + 1)
+
+		// ensure no previous height was left
+		if startPruneHeight == lastRetainHeight {
+			startKey = prefixKeyForHeight(1)
 		}
-		if deleted%1000 == 0 && deleted != 0 {
-			err = flush(batch)
-			if err != nil {
-				return 0, lastRetainHeight, err
-			}
-			txi.totalPrunedHeights += int64(deleted)
-			deleted = 0
-			batch = txi.store.NewBatch()
-			defer closeBatch(batch)
-		}
-	}
-	if deleted != 0 {
-		err = flush(batch)
+
+		itr, err := txi.store.Iterator(startKey, endKey)
 		if err != nil {
 			return 0, lastRetainHeight, err
 		}
-	}
-	txi.totalPrunedHeights += int64(deleted)
-	itr.Close()
-	itr, err = txi.store.Iterator(nil, nil)
-	if err != nil {
-		return 0, lastRetainHeight, err
-	}
-	defer itr.Close()
 
-	batch2 := txi.store.NewBatch()
-	deleted = 0
+		keysToDelete := make([][]byte, 0, 2*(endPruneHeight-startPruneHeight))
+		for ; itr.Valid(); itr.Next() {
+			keyHeight, err := extractHeightFromKey(itr.Key())
+			if err != nil {
+				// this is ok as the keys here are not only indexed by height
+				continue
+			}
+			if keyHeight < retainHeight {
+				keysToDelete = append(keysToDelete, bytes.Clone(itr.Key()))   // Height Key
+				keysToDelete = append(keysToDelete, bytes.Clone(itr.Value())) // TX Hash Key
 
-	defer closeBatch(batch2)
-	for ; itr.Valid(); itr.Next() {
-		if _, ok := txHashesToDelete[string(itr.Key())]; ok {
-			err := batch2.Delete(itr.Key())
-			if err != nil {
-				return 0, lastRetainHeight, err
+				resultbytesFromTxHash, err := txi.store.Get(itr.Value())
+				if err != nil {
+					continue
+				}
+				err = proto.Unmarshal(resultbytesFromTxHash, result)
+				if err != nil {
+					continue
+				}
+				eventKeys, err := txi.collectEventKeysToDelete(result)
+				if err != nil {
+					continue
+				}
+				keysToDelete = append(keysToDelete, eventKeys...) // Event keys
+				if keyHeight != lastCountedHeight {
+					affectedHeights++
+					lastCountedHeight = keyHeight
+				}
 			}
-			result := new(abci.TxResult)
-			err = proto.Unmarshal(itr.Value(), result)
-			if err != nil {
-				return 0, lastRetainHeight, err
-			}
-			err = txi.deleteResult(result, batch2)
+
+		}
+		deleted := 0
+		for _, keyToDelete := range keysToDelete {
+			err := batch.Delete(keyToDelete)
 			if err != nil {
 				return 0, lastRetainHeight, err
 			}
 			deleted++
 
 			if deleted%1000 == 0 && deleted != 0 {
-				err = flush(batch2)
+				err = flush(batch)
 				if err != nil {
 					return 0, lastRetainHeight, err
 				}
+				txi.totalPrunedKeys += int64(deleted)
 				deleted = 0
-				txi.totalPrunedHeights += int64(deleted)
-				batch2 = txi.store.NewBatch()
-				defer closeBatch(batch2)
+				batch = txi.store.NewBatch()
 			}
 		}
-	}
-
-	errSetLastRetainHeight := txi.setIndexerRetainHeight(retainHeight, batch2)
-	if deleted != 0 {
-		err = flush(batch2)
-		if err != nil {
-			return 0, lastRetainHeight, errSetLastRetainHeight
+		if deleted != 0 {
+			err = flush(batch)
+			if err != nil {
+				return 0, lastRetainHeight, err
+			}
+			txi.totalPrunedKeys += int64(deleted)
+			deleted = 0
+			batch = txi.store.NewBatch()
 		}
-	}
-	txi.totalPrunedHeights += int64(deleted)
+		txi.log.Info("txIndex prune loop successfully deleted the keys", "startPruneHeight", startPruneHeight, "endPruneHeight", endPruneHeight, "totalPrunedKeys", txi.totalPrunedKeys)
 
-	if txi.compact && txi.totalPrunedHeights >= txi.compactionInterval {
+		itr.Close()
+	}
+
+	batch = txi.store.NewBatch()
+	errSetLastRetainHeight := txi.setIndexerRetainHeight(retainHeight, batch)
+	err = flush(batch)
+	if err != nil {
+		return 0, lastRetainHeight, errSetLastRetainHeight
+	}
+	txi.totalPrunedKeys += int64(1)
+
+	if txi.compact && txi.totalPrunedKeys >= txi.compactionInterval {
 		db.CompactSharded256(txi.store, "txindex prune")
-		txi.totalPrunedHeights = 0
+		txi.totalPrunedKeys = 0
 	}
 
 	if errSetLastRetainHeight != nil {
 		return 0, lastRetainHeight, errSetLastRetainHeight
 	}
-	return int64(len(affectedHeights)), retainHeight, err
+	return int64(affectedHeights), retainHeight, err
 }
 
 func (txi *TxIndex) PruneOld(retainHeight int64) (int64, int64, error) {
@@ -476,33 +482,58 @@ func (txi *TxIndex) Index(result *abci.TxResult) error {
 	return b.WriteSync()
 }
 
-func (txi *TxIndex) deleteEvents(result *abci.TxResult, batch dbm.Batch) error {
+// collectEventKeysToDelete walks the event index ranges for a TxResult and returns
+// all concrete keys that should be deleted. It does NOT perform any writes.
+// Keys are cloned because LevelDB iterator buffers are reused.
+func (txi *TxIndex) collectEventKeysToDelete(result *abci.TxResult) ([][]byte, error) {
+	keys := make([][]byte, 0, 128) // modest starting cap; grows as needed
+
 	for _, event := range result.Result.Events {
-		// only delete events with a non-empty type
+		// only consider events with a non-empty type
 		if len(event.Type) == 0 {
 			continue
 		}
 
 		for _, attr := range event.Attributes {
+			// only consider attributes with a non-empty key
 			if len(attr.Key) == 0 {
+				continue
+			}
+			// only delete indexed attributes
+			if !attr.GetIndex() {
 				continue
 			}
 
 			compositeTag := fmt.Sprintf("%s.%s", event.Type, attr.Key)
-			if attr.GetIndex() {
-				zeroKey := keyForEvent(compositeTag, attr.Value, result, 0)
-				endKey := keyForEvent(compositeTag, attr.Value, result, math.MaxInt64)
-				itr, err := txi.store.Iterator(zeroKey, endKey)
-				if err != nil {
-					return err
-				}
-				for ; itr.Valid(); itr.Next() {
-					err := batch.Delete(itr.Key())
-					if err != nil {
-						return err
-					}
-				}
+			zeroKey := keyForEvent(compositeTag, attr.Value, result, 0)
+			endKey := keyForEvent(compositeTag, attr.Value, result, math.MaxInt64)
+
+			itr, err := txi.store.Iterator(zeroKey, endKey)
+			if err != nil {
+				return nil, err
 			}
+
+			for ; itr.Valid(); itr.Next() {
+				// Clone the key because iterator buffers are reused.
+				keys = append(keys, bytes.Clone(itr.Key()))
+			}
+			// Always close the iterator before any writes happen.
+			itr.Close()
+		}
+	}
+
+	return keys, nil
+}
+
+func (txi *TxIndex) deleteEvents(result *abci.TxResult, batch dbm.Batch) error {
+	keys, err := txi.collectEventKeysToDelete(result)
+	if err != nil {
+		return err
+	}
+
+	for _, k := range keys {
+		if err := batch.Delete(k); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -1090,6 +1121,13 @@ func keyForHeight(result *abci.TxResult) []byte {
 		// Added to facilitate having the eventSeq in event keys
 		// Otherwise queries break expecting 5 entries
 		eventSeqSeparator+"0",
+	))
+}
+
+func prefixKeyForHeight(height int64) []byte {
+	return []byte(fmt.Sprintf("%s/%d",
+		types.TxHeightKey,
+		height,
 	))
 }
 

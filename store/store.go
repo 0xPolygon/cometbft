@@ -62,7 +62,7 @@ type BlockStore struct {
 	blockCommitCache         *lru.Cache[int64, *types.Commit]
 	blockExtendedCommitCache *lru.Cache[int64, *types.ExtendedCommit]
 
-	blocksDeleted        int64
+	blocksToCompact      int64
 	compact              bool
 	compactionInterval   int64
 	startHeightToCompact int64
@@ -457,7 +457,6 @@ func (bs *BlockStore) PruneBlocks(height int64, state sm.State) (uint64, int64, 
 				return 0, -1, err
 			}
 			batch = bs.db.NewBatch()
-			defer batch.Close()
 		}
 	}
 
@@ -465,16 +464,16 @@ func (bs *BlockStore) PruneBlocks(height int64, state sm.State) (uint64, int64, 
 	if err != nil {
 		return 0, -1, err
 	}
-	if bs.blocksDeleted == 0 && pruned > 0 {
+	if bs.blocksToCompact == 0 && pruned > 0 {
 		bs.startHeightToCompact = startHeight
 	}
-	bs.blocksDeleted += int64(pruned)
+	bs.blocksToCompact += int64(pruned)
 
 	blockPartKey0 := func(h int64) []byte {
 		return calcBlockPartKey(h, 0)
 	}
 
-	if bs.compact && bs.blocksDeleted >= bs.compactionInterval {
+	if bs.compact && bs.blocksToCompact >= bs.compactionInterval {
 		db.CompactPrefixHex256(bs.db, "BH:", "blockHashKeyRange on prune blocks") //BlockHashKeyRange
 		db.CompactIntSharded(bs.db, bs.startHeightToCompact, endHeight, db.MaxCompactionInterval, calcBlockMetaKey, "calcBlockMetaKey on prune blocks")
 		db.CompactIntSharded(bs.db, bs.startHeightToCompact, endHeight, db.MaxCompactionInterval, calcBlockCommitKey, "calcBlockCommitKey on prune blocks")
@@ -482,7 +481,7 @@ func (bs *BlockStore) PruneBlocks(height int64, state sm.State) (uint64, int64, 
 		db.CompactIntSharded(bs.db, bs.startHeightToCompact, endHeight, db.MaxCompactionInterval, calcSeenCommitKey, "calcSeenCommitKey on prune blocks")
 		db.CompactIntSharded(bs.db, bs.startHeightToCompact, endHeight, db.MaxCompactionInterval, calcExtCommitKey, "calcExtCommitKey on prune blocks")
 		db.CompactIntSharded(bs.db, bs.startHeightToCompact, endHeight+1, db.MaxCompactionInterval, blockPartKey0, "blockPartKey0 on prune blocks")
-		bs.blocksDeleted = 0
+		bs.blocksToCompact = 0
 	}
 	return pruned, evidencePoint, err
 }

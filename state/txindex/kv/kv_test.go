@@ -130,7 +130,7 @@ func TestTxIndex_Prune(t *testing.T) {
 	assert.True(t, isSubset(keys1, keys2))
 
 	batch2 := indexer.store.NewBatch()
-	err = indexer.setIndexerRetainHeight(2, batch2)
+	err = indexer.setIndexerRetainHeight(0, batch2)
 	require.NoError(t, err)
 	err = batch2.WriteSync()
 	require.NoError(t, err)
