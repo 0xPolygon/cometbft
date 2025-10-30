@@ -34,7 +34,7 @@ const (
 	tagKeySeparatorRune = '/'
 	eventSeqSeparator   = "$es$"
 
-	MaxHeightRangeIterationForPrune = 50000
+	SoftMaxCapForKeysToDelete = 100000
 )
 
 var (
@@ -65,6 +65,15 @@ func WithCompaction(compact bool, compactionInterval int64) TxIndexerOption {
 	}
 }
 
+// nextKey returns the smallest key that is strictly greater than k in
+// lexicographic order. A simple/safe way is to append a 0x00 sentinel.
+func nextKey(k []byte) []byte {
+	nk := make([]byte, len(k)+1)
+	copy(nk, k)
+	nk[len(k)] = 0
+	return nk
+}
+
 func (txi *TxIndex) Prune(retainHeight int64) (int64, int64, error) {
 	lastRetainHeight, err := txi.getIndexerRetainHeight()
 	if err != nil {
@@ -74,142 +83,166 @@ func (txi *TxIndex) Prune(retainHeight int64) (int64, int64, error) {
 		lastRetainHeight = 1
 	}
 
-	batch := txi.store.NewBatch()
-	closeBatch := func(batch dbm.Batch) {
-		err := batch.Close()
-		if err != nil {
-			txi.log.Error(fmt.Sprintf("Error when closing tx indexer pruning batch: %v", err))
-		}
-	}
-	defer closeBatch(batch)
-
-	flush := func(batch dbm.Batch) error {
-		err := batch.WriteSync()
-		if err != nil {
+	// Deletion batching helpers
+	newBatch := func() dbm.Batch { return txi.store.NewBatch() }
+	flush := func(b dbm.Batch) error {
+		if err := b.WriteSync(); err != nil {
 			return fmt.Errorf("failed to flush tx indexer pruning batch %w", err)
 		}
-		err = batch.Close()
-		if err != nil {
+		if err := b.Close(); err != nil {
 			txi.log.Error(fmt.Sprintf("Error when closing tx indexer pruning batch: %v", err))
 		}
 		return nil
 	}
 
-	affectedHeights := 0
+	// Staging buffer threshold (number of concrete keys, not heights).
+	// You can tune this; using your height window as a soft cap is fine.
+	const perBatchFlush = 1000 // write-sync every N deletes
+
+	affectedHeights := int64(0)
 	lastCountedHeight := int64(math.MinInt64)
-	result := new(abci.TxResult)
 
-	for startPruneHeight := lastRetainHeight; startPruneHeight < retainHeight; startPruneHeight += MaxHeightRangeIterationForPrune {
+	// Where to start the very first iterator
+	startKey := prefixKeyForHeight(lastRetainHeight)
+	// Per your note: first scan may start before the first real key (e.g., many empties).
+	// That's fine because end=nil iterates forward until keys exist or EOF.
 
-		endPruneHeight := startPruneHeight + MaxHeightRangeIterationForPrune
-		if endPruneHeight > retainHeight {
-			endPruneHeight = retainHeight
-		}
-		txi.log.Info("txIndex prune loop", "startPruneHeight", startPruneHeight, "endPruneHeight", endPruneHeight)
+	done := false
+	var result abci.TxResult
+	keysToDelete := make([][]byte, 0, SoftMaxCapForKeysToDelete) // rough cap; grows if needed
 
-		startKey := prefixKeyForHeight(startPruneHeight)
-		endKey := prefixKeyForHeight(endPruneHeight + 1)
-
-		// ensure no previous height was left
-		if startPruneHeight == lastRetainHeight {
-			startKey = prefixKeyForHeight(1)
-		}
-
-		itr, err := txi.store.Iterator(startKey, endKey)
+	for !done {
+		txi.log.Info("Starting prune txIndex loop", "startKey", string(startKey))
+		itr, err := txi.store.Iterator(startKey, nil) // end=nil → iterate to end of keyspace
 		if err != nil {
 			return 0, lastRetainHeight, err
 		}
 
-		successEventsCaught := 0
-		totalIterKeys := 0
-		keysToDelete := make([][]byte, 0, 2*(endPruneHeight-startPruneHeight))
-		for ; itr.Valid(); itr.Next() {
-			keyHeight, err := extractHeightFromKey(itr.Key())
-			if err != nil {
-				// this is ok as the keys here are not only indexed by height
-				continue
-			}
+		keysToDelete = keysToDelete[:0]
+		// Stage concrete keys (height key, tx-hash key, event keys)
+		staged := 0
 
-			// stop since there is no need to keep iterating
-			if keyHeight >= endPruneHeight {
+		// Track the last height-key we processed to resume after flushing
+		var lastHeightKey []byte
+
+		// Iterate and stage keys
+		for ; itr.Valid(); itr.Next() {
+			// If buffer is "full enough" for this chunk, break and delete.
+			if staged >= SoftMaxCapForKeysToDelete {
 				break
 			}
 
-			totalIterKeys++
-
-			keysToDelete = append(keysToDelete, bytes.Clone(itr.Key()))   // Height Key
-			keysToDelete = append(keysToDelete, bytes.Clone(itr.Value())) // TX Hash Key
-
-			resultbytesFromTxHash, err := txi.store.Get(itr.Value())
-			if err != nil {
+			// Parse height of the *iterator key* (height index family)
+			keyHeight, herr := extractHeightFromKey(itr.Key())
+			if herr != nil {
+				// Not a height-index key; skip
 				continue
 			}
-			if len(resultbytesFromTxHash) > 0 {
-				err = proto.Unmarshal(resultbytesFromTxHash, result)
-				if err != nil {
-					continue
-				}
-				eventKeys, err := txi.collectEventKeysToDelete(result)
-				if err != nil {
-					continue
-				}
-				keysToDelete = append(keysToDelete, eventKeys...) // Event keys
-				successEventsCaught++
+
+			// If we already reached/passed retainHeight, we are DONE overall
+			if keyHeight >= retainHeight {
+				done = true
+				break
 			}
+
+			// Count unique heights (height-index keys for same height are grouped)
 			if keyHeight != lastCountedHeight {
 				affectedHeights++
 				lastCountedHeight = keyHeight
 			}
 
+			// Stage: height key and tx-hash key
+			hk := bytes.Clone(itr.Key())   // MUST clone iterator buffers
+			hv := bytes.Clone(itr.Value()) // hash key (used both as key to delete and for Get)
+			keysToDelete = append(keysToDelete, hk)
+			keysToDelete = append(keysToDelete, hv)
+			staged += 2
+
+			lastHeightKey = hk // remember for resume
+
+			// Optional: fetch tx result and stage event-index keys
+			if val, gerr := txi.store.Get(itr.Value()); gerr == nil && len(val) > 0 {
+				result.Reset()
+				if uerr := proto.Unmarshal(val, &result); uerr == nil {
+					if evKeys, eerr := txi.collectEventKeysToDelete(&result); eerr == nil && len(evKeys) > 0 {
+						keysToDelete = append(keysToDelete, evKeys...)
+						staged += len(evKeys)
+					}
+				}
+			}
 		}
+
+		itr.Close()
+
+		// Nothing staged and we either hit EOF or crossed retainHeight → we're done
+		if staged == 0 {
+			break
+		}
+
+		// Perform deletes for this staged chunk, flushing every perBatchFlush
+		batch := newBatch()
 		deleted := 0
-		for _, keyToDelete := range keysToDelete {
-			err := batch.Delete(keyToDelete)
-			if err != nil {
+		for _, k := range keysToDelete {
+			if err := batch.Delete(k); err != nil {
 				return 0, lastRetainHeight, err
 			}
 			deleted++
-
-			if deleted%1000 == 0 && deleted != 0 {
-				err = flush(batch)
-				if err != nil {
+			if deleted%perBatchFlush == 0 {
+				if err := flush(batch); err != nil {
 					return 0, lastRetainHeight, err
 				}
 				txi.totalPrunedKeys += int64(deleted)
 				deleted = 0
-				batch = txi.store.NewBatch()
+				batch = newBatch()
 			}
 		}
-		if deleted != 0 {
-			err = flush(batch)
-			if err != nil {
+		if deleted > 0 {
+			if err := flush(batch); err != nil {
 				return 0, lastRetainHeight, err
 			}
 			txi.totalPrunedKeys += int64(deleted)
-			deleted = 0
-			batch = txi.store.NewBatch()
 		}
-		txi.log.Info("txIndex prune loop successfully deleted the keys", "startPruneHeight", startPruneHeight, "endPruneHeight", endPruneHeight, "totalPrunedKeys", txi.totalPrunedKeys, "totalIterKeys", totalIterKeys, "successEventsCaught", successEventsCaught)
 
-		itr.Close()
+		// Resume iteration right AFTER the last height key we processed
+		// If we broke because of retainHeight, 'done' will be true and loop exits.
+		if lastHeightKey != nil {
+			startKey = nextKey(lastHeightKey)
+		} else {
+			// Defensive: if nothing processed (very sparse), bump startKey forward by appending 0
+			startKey = nextKey(startKey)
+		}
+
+		// droping references to the cloned []byte so GC can free them
+		for i := range keysToDelete {
+			keysToDelete[i] = nil
+		}
+
+		// capacity shrinking
+		if cap(keysToDelete) > SoftMaxCapForKeysToDelete {
+			keysToDelete = nil // let GC reclaim backing array
+		}
 	}
 
-	errSetLastRetainHeight := txi.setIndexerRetainHeight(retainHeight, batch)
-	err = flush(batch)
-	if err != nil {
-		return 0, lastRetainHeight, errSetLastRetainHeight
+	// Persist the new retain height
+	batch := txi.store.NewBatch()
+	if err := txi.setIndexerRetainHeight(retainHeight, batch); err != nil {
+		// best effort: still try to close the batch cleanly
+		_ = flush(batch)
+		return 0, lastRetainHeight, err
 	}
-	txi.totalPrunedKeys += int64(1)
+	if err := flush(batch); err != nil {
+		return 0, lastRetainHeight, err
+	}
+	txi.totalPrunedKeys += 1
 
 	if txi.compact && txi.totalPrunedKeys >= txi.compactionInterval {
-		db.CompactSharded256(txi.store, "txindex prune")
+		if err := db.CompactSharded256(txi.store, "txindex prune"); err != nil {
+			txi.log.Error("compaction failed", "err", err)
+		}
 		txi.totalPrunedKeys = 0
 	}
 
-	if errSetLastRetainHeight != nil {
-		return 0, lastRetainHeight, errSetLastRetainHeight
-	}
-	return int64(affectedHeights), retainHeight, err
+	return affectedHeights, retainHeight, nil
 }
 
 func (txi *TxIndex) PruneOld(retainHeight int64) (int64, int64, error) {
