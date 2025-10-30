@@ -194,7 +194,6 @@ func (txi *TxIndex) Prune(retainHeight int64) (int64, int64, error) {
 		itr.Close()
 	}
 
-	batch = txi.store.NewBatch()
 	errSetLastRetainHeight := txi.setIndexerRetainHeight(retainHeight, batch)
 	err = flush(batch)
 	if err != nil {

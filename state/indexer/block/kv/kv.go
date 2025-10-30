@@ -180,7 +180,6 @@ func (idx *BlockerIndexer) Prune(retainHeight int64) (int64, int64, error) {
 			idx.totalPrunedHeights += int64(deleted)
 			deleted = 0
 			batch = idx.store.NewBatch()
-			defer closeBatch(batch)
 		}
 	}
 
@@ -189,13 +188,13 @@ func (idx *BlockerIndexer) Prune(retainHeight int64) (int64, int64, error) {
 		return 0, lastRetainHeight, errSetLastRetainHeight
 	}
 
-	if deleted > 0 {
-		idx.totalPrunedHeights += int64(deleted)
-		errWriteBatch := batch.WriteSync()
-		if errWriteBatch != nil {
-			return 0, lastRetainHeight, errWriteBatch
-		}
+	// always flush because setLastRetainHeight
+	err = flush(batch)
+	if err != nil {
+		return 0, lastRetainHeight, err
 	}
+	idx.totalPrunedHeights += int64(deleted)
+	deleted = 0
 
 	if idx.compact && idx.totalPrunedHeights >= idx.compactionInterval {
 		db.CompactSharded256(idx.store, "block indexer")
