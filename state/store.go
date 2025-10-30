@@ -521,7 +521,7 @@ func (store dbStore) PruneABCIResponses(targetRetainHeight int64, forceCompact b
 		store.StoreStateKeeper.ResultsToCompact += uint64(pruned + batchPruned)
 		//nolint:staticcheck
 		if store.StoreStateKeeper.ResultsToCompact >= (uint64)(store.StoreOptions.CompactionInterval) {
-			db.CompactAndLog(store.db, calcABCIResponsesKey(store.StoreStateKeeper.StartResultHeightToCompact), calcABCIResponsesKey(endHeight+1), "prune abci responses")
+			db.CompactIntSharded(store.db, store.StoreStateKeeper.StartResultHeightToCompact, endHeight+1, db.MaxCompactionInterval, calcABCIResponsesKey, "prune abci responses")
 			store.StoreStateKeeper.ResultsToCompact = 0
 		}
 	}
