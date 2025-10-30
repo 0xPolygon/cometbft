@@ -480,7 +480,7 @@ func (bs *BlockStore) PruneBlocks(height int64, state sm.State) (uint64, int64, 
 		db.CompactIntSharded(bs.db, bs.startHeightToCompact, endHeight, db.MaxCompactionInterval, calcExtCommitKey, "calcExtCommitKey on prune blocks")
 		db.CompactIntSharded(bs.db, bs.startHeightToCompact, endHeight, db.MaxCompactionInterval, calcSeenCommitKey, "calcSeenCommitKey on prune blocks")
 		db.CompactIntSharded(bs.db, bs.startHeightToCompact, endHeight, db.MaxCompactionInterval, calcExtCommitKey, "calcExtCommitKey on prune blocks")
-		db.CompactIntSharded(bs.db, bs.startHeightToCompact, endHeight+1, db.MaxCompactionInterval, blockPartKey0, "blockPartKey0 on prune blocks")
+		db.CompactIntSharded(bs.db, bs.startHeightToCompact, endHeight, db.MaxCompactionInterval, blockPartKey0, "blockPartKey0 on prune blocks")
 		bs.blocksToCompact = 0
 	}
 	return pruned, evidencePoint, err
