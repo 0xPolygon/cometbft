@@ -97,7 +97,7 @@ func (txi *TxIndex) Prune(retainHeight int64) (int64, int64, error) {
 
 	affectedHeights := 0
 	lastCountedHeight := int64(math.MinInt64)
-	var result *abci.TxResult
+	result := new(abci.TxResult)
 
 	for startPruneHeight := lastRetainHeight; startPruneHeight < retainHeight; startPruneHeight += MaxHeightRangeIterationForPrune {
 
