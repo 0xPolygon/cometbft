@@ -120,6 +120,8 @@ func (txi *TxIndex) Prune(retainHeight int64) (int64, int64, error) {
 			return 0, lastRetainHeight, err
 		}
 
+		successEventsCaught := 0
+		totalIterKeys := 0
 		keysToDelete := make([][]byte, 0, 2*(endPruneHeight-startPruneHeight))
 		for ; itr.Valid(); itr.Next() {
 			keyHeight, err := extractHeightFromKey(itr.Key())
@@ -128,6 +130,8 @@ func (txi *TxIndex) Prune(retainHeight int64) (int64, int64, error) {
 				continue
 			}
 			if keyHeight < retainHeight {
+				totalIterKeys++
+
 				keysToDelete = append(keysToDelete, bytes.Clone(itr.Key()))   // Height Key
 				keysToDelete = append(keysToDelete, bytes.Clone(itr.Value())) // TX Hash Key
 
@@ -135,15 +139,18 @@ func (txi *TxIndex) Prune(retainHeight int64) (int64, int64, error) {
 				if err != nil {
 					continue
 				}
-				err = proto.Unmarshal(resultbytesFromTxHash, result)
-				if err != nil {
-					continue
+				if len(resultbytesFromTxHash) > 0 {
+					err = proto.Unmarshal(resultbytesFromTxHash, result)
+					if err != nil {
+						continue
+					}
+					eventKeys, err := txi.collectEventKeysToDelete(result)
+					if err != nil {
+						continue
+					}
+					keysToDelete = append(keysToDelete, eventKeys...) // Event keys
+					successEventsCaught++
 				}
-				eventKeys, err := txi.collectEventKeysToDelete(result)
-				if err != nil {
-					continue
-				}
-				keysToDelete = append(keysToDelete, eventKeys...) // Event keys
 				if keyHeight != lastCountedHeight {
 					affectedHeights++
 					lastCountedHeight = keyHeight
@@ -178,7 +185,7 @@ func (txi *TxIndex) Prune(retainHeight int64) (int64, int64, error) {
 			deleted = 0
 			batch = txi.store.NewBatch()
 		}
-		txi.log.Info("txIndex prune loop successfully deleted the keys", "startPruneHeight", startPruneHeight, "endPruneHeight", endPruneHeight, "totalPrunedKeys", txi.totalPrunedKeys)
+		txi.log.Info("txIndex prune loop successfully deleted the keys", "startPruneHeight", startPruneHeight, "endPruneHeight", endPruneHeight, "totalPrunedKeys", txi.totalPrunedKeys, "totalIterKeys", totalIterKeys, "successEventsCaught", successEventsCaught)
 
 		itr.Close()
 	}
