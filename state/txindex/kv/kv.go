@@ -129,32 +129,36 @@ func (txi *TxIndex) Prune(retainHeight int64) (int64, int64, error) {
 				// this is ok as the keys here are not only indexed by height
 				continue
 			}
-			if keyHeight < retainHeight {
-				totalIterKeys++
 
-				keysToDelete = append(keysToDelete, bytes.Clone(itr.Key()))   // Height Key
-				keysToDelete = append(keysToDelete, bytes.Clone(itr.Value())) // TX Hash Key
+			// stop since there is no need to keep iterating
+			if keyHeight >= endPruneHeight {
+				break
+			}
 
-				resultbytesFromTxHash, err := txi.store.Get(itr.Value())
+			totalIterKeys++
+
+			keysToDelete = append(keysToDelete, bytes.Clone(itr.Key()))   // Height Key
+			keysToDelete = append(keysToDelete, bytes.Clone(itr.Value())) // TX Hash Key
+
+			resultbytesFromTxHash, err := txi.store.Get(itr.Value())
+			if err != nil {
+				continue
+			}
+			if len(resultbytesFromTxHash) > 0 {
+				err = proto.Unmarshal(resultbytesFromTxHash, result)
 				if err != nil {
 					continue
 				}
-				if len(resultbytesFromTxHash) > 0 {
-					err = proto.Unmarshal(resultbytesFromTxHash, result)
-					if err != nil {
-						continue
-					}
-					eventKeys, err := txi.collectEventKeysToDelete(result)
-					if err != nil {
-						continue
-					}
-					keysToDelete = append(keysToDelete, eventKeys...) // Event keys
-					successEventsCaught++
+				eventKeys, err := txi.collectEventKeysToDelete(result)
+				if err != nil {
+					continue
 				}
-				if keyHeight != lastCountedHeight {
-					affectedHeights++
-					lastCountedHeight = keyHeight
-				}
+				keysToDelete = append(keysToDelete, eventKeys...) // Event keys
+				successEventsCaught++
+			}
+			if keyHeight != lastCountedHeight {
+				affectedHeights++
+				lastCountedHeight = keyHeight
 			}
 
 		}

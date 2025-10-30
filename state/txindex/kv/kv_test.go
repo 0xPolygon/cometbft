@@ -16,6 +16,7 @@ import (
 	db "github.com/cometbft/cometbft-db"
 
 	abci "github.com/cometbft/cometbft/abci/types"
+	"github.com/cometbft/cometbft/libs/log"
 	"github.com/cometbft/cometbft/libs/pubsub/query"
 	cmtrand "github.com/cometbft/cometbft/libs/rand"
 	"github.com/cometbft/cometbft/state/txindex"
@@ -70,6 +71,9 @@ func TestTxIndex(t *testing.T) {
 
 func TestTxIndex_Prune(t *testing.T) {
 	indexer := NewTxIndex(db.NewMemDB(), WithCompaction(true, 5))
+	indexer.SetLogger(log.TestingLogger().With("module", "txindex"))
+
+	firstMainnetHeight := int64(24450119)
 
 	metaKeys := [][]byte{
 		LastTxIndexerRetainHeightKey,
@@ -85,7 +89,7 @@ func TestTxIndex_Prune(t *testing.T) {
 		{Type: "", Attributes: []abci.EventAttribute{{Key: "not_allowed", Value: "Vlad", Index: true}}},
 	}
 	txResult := &abci.TxResult{
-		Height: 1,
+		Height: firstMainnetHeight,
 		Index:  0,
 		Tx:     tx,
 		Result: abci.ExecTxResult{
@@ -107,7 +111,7 @@ func TestTxIndex_Prune(t *testing.T) {
 
 	tx2 := types.Tx("BYE BYE WORLD")
 	txResult2 := &abci.TxResult{
-		Height: 2,
+		Height: firstMainnetHeight + 1,
 		Index:  0,
 		Tx:     tx2,
 		Result: abci.ExecTxResult{
@@ -136,10 +140,10 @@ func TestTxIndex_Prune(t *testing.T) {
 	require.NoError(t, err)
 	defer batch2.Close()
 
-	numPruned, retainedHeight, err := indexer.Prune(2)
+	numPruned, retainedHeight, err := indexer.Prune(firstMainnetHeight + 1)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(1), numPruned)
-	assert.Equal(t, int64(2), retainedHeight)
+	assert.Equal(t, firstMainnetHeight+1, retainedHeight)
 
 	keys3 := GetKeys(indexer)
 
