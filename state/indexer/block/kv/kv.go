@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"sort"
 	"strconv"
@@ -154,16 +155,22 @@ func (idx *BlockerIndexer) Prune(retainHeight int64) (int64, int64, error) {
 	defer itr.Close()
 
 	deleted := 0
-	affectedHeights := make(map[int64]struct{})
+	affectedHeights := 0
+	lastCountedHeight := int64(math.MinInt64)
+
 	for ; itr.Valid(); itr.Next() {
 		if keyBelongsToHeightRange(itr.Key(), lastRetainHeight, retainHeight) {
 			err := batch.Delete(itr.Key())
 			if err != nil {
 				return 0, lastRetainHeight, err
 			}
-			height := getHeightFromKey(itr.Key())
-			affectedHeights[height] = struct{}{}
 			deleted++
+			keyHeight := getHeightFromKey(itr.Key())
+
+			if keyHeight != lastCountedHeight {
+				affectedHeights++
+				lastCountedHeight = keyHeight
+			}
 		}
 		if deleted%1000 == 0 && deleted != 0 {
 			err = flush(batch)
@@ -195,7 +202,7 @@ func (idx *BlockerIndexer) Prune(retainHeight int64) (int64, int64, error) {
 		idx.totalPrunedHeights = 0
 	}
 
-	return int64(len(affectedHeights)), retainHeight, err
+	return int64(affectedHeights), retainHeight, err
 }
 
 func (idx *BlockerIndexer) SetRetainHeight(retainHeight int64) error {
