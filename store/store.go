@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 
 	"github.com/cosmos/gogoproto/proto"
@@ -237,7 +238,10 @@ func (bs *BlockStore) LoadBlockPart(height int64, index int) *types.Part {
 // If no block is found for the given height, it returns nil.
 func (bs *BlockStore) LoadBlockMeta(height int64) *types.BlockMeta {
 	pbbm := new(cmtproto.BlockMeta)
-	bz, err := bs.db.Get(calcBlockMetaKey(height))
+	bz, err := dbm.GetWithOpts(bs.db, calcBlockMetaKey(height), &dbm.ReadOptions{
+		DontFillCache: true,
+	})
+
 	if err != nil {
 		panic(err)
 	}
@@ -399,6 +403,7 @@ func (bs *BlockStore) PruneBlocks(height int64, state sm.State) (uint64, int64, 
 	evidencePoint := height
 	startHeight := base
 	endHeight := height - 1
+	log.Printf("Starting prune blocks loop start=%d end=%d", base, height)
 	for h := base; h < height; h++ {
 
 		meta := bs.LoadBlockMeta(h)

@@ -140,6 +140,8 @@ require (
 	gotest.tools v2.2.0+incompatible // indirect
 )
 
+replace github.com/cometbft/cometbft-db => github.com/lucca30/cometbft-db v0.14.1-lucca
+
 retract (
 	// bumped go version in minor release
 	v0.38.14
