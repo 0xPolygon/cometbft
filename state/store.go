@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log"
 
 	"github.com/cosmos/gogoproto/proto"
 
@@ -319,7 +320,7 @@ func (store dbStore) PruneStates(from int64, to int64, evidenceThresholdHeight i
 		return 0, fmt.Errorf("from height %v must be lower than to height %v", from, to)
 	}
 
-	valInfo, err := loadValidatorsInfo(store.db, min(to, evidenceThresholdHeight))
+	valInfo, err := loadValidatorsInfo(store.db, min(to, evidenceThresholdHeight), true)
 	if err != nil {
 		return 0, fmt.Errorf("validators at height %v not found: %w", to, err)
 	}
@@ -347,12 +348,13 @@ func (store dbStore) PruneStates(from int64, to int64, evidenceThresholdHeight i
 
 	// We have to delete in reverse order, to avoid deleting previous heights that have validator
 	// sets and consensus params that we may need to retrieve.
+	log.Printf("Starting prune state loop start=%d end=%d", to-1, from)
 	for h := to - 1; h >= from; h-- {
 		// For heights we keep, we must make sure they have the full validator set or consensus
 		// params, otherwise they will panic if they're retrieved directly (instead of
 		// indirectly via a LastHeightChanged pointer).
 		if keepVals[h] {
-			v, err := loadValidatorsInfo(store.db, h)
+			v, err := loadValidatorsInfo(store.db, h, true)
 			if err != nil || v.ValidatorSet == nil {
 				vip, err := store.LoadValidators(h)
 				if err != nil {
@@ -430,7 +432,6 @@ func (store dbStore) PruneStates(from int64, to int64, evidenceThresholdHeight i
 			}
 			batch.Close()
 			batch = store.db.NewBatch()
-			defer batch.Close()
 		}
 	}
 
@@ -455,6 +456,7 @@ func (store dbStore) PruneStates(from int64, to int64, evidenceThresholdHeight i
 			store.StoreStateKeeper.StatesToCompact = 0
 		}
 	}
+	log.Printf("Finishing prune state loop start=%d end=%d", to-1, from)
 
 	return pruned, nil
 }
@@ -501,7 +503,6 @@ func (store dbStore) PruneABCIResponses(targetRetainHeight int64, forceCompact b
 			}
 
 			batch = store.db.NewBatch()
-			defer batch.Close()
 		}
 	}
 	if err = batch.WriteSync(); err != nil {
@@ -758,13 +759,13 @@ func (store dbStore) setLastABCIResponsesRetainHeight(height int64) error {
 // LoadValidators loads the ValidatorSet for a given height.
 // Returns ErrNoValSetForHeight if the validator set can't be found for this height.
 func (store dbStore) LoadValidators(height int64) (*types.ValidatorSet, error) {
-	valInfo, err := loadValidatorsInfo(store.db, height)
+	valInfo, err := loadValidatorsInfo(store.db, height, false)
 	if err != nil {
 		return nil, ErrNoValSetForHeight{height}
 	}
 	if valInfo.ValidatorSet == nil {
 		lastStoredHeight := lastStoredHeightFor(height, valInfo.LastHeightChanged)
-		valInfo2, err := loadValidatorsInfo(store.db, lastStoredHeight)
+		valInfo2, err := loadValidatorsInfo(store.db, lastStoredHeight, false)
 		if err != nil || valInfo2.ValidatorSet == nil {
 			return nil,
 				fmt.Errorf("couldn't find validators at height %d (height %d was originally requested): %w",
@@ -803,8 +804,8 @@ func lastStoredHeightFor(height, lastHeightChanged int64) int64 {
 }
 
 // CONTRACT: Returned ValidatorsInfo can be mutated.
-func loadValidatorsInfo(db dbm.DB, height int64) (*cmtstate.ValidatorsInfo, error) {
-	buf, err := db.Get(calcValidatorsKey(height))
+func loadValidatorsInfo(db dbm.DB, height int64, dontFillCache bool) (*cmtstate.ValidatorsInfo, error) {
+	buf, err := dbm.GetWithOpts(db, calcValidatorsKey(height), &dbm.ReadOptions{DontFillCache: dontFillCache})
 	if err != nil {
 		return nil, err
 	}

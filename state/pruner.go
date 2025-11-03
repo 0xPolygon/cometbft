@@ -549,6 +549,7 @@ func (p *Pruner) pruneBlocksToHeight(height int64) (uint64, int64, error) {
 
 	if pruned > 0 {
 
+		p.logger.Info("Starting State Pruning")
 		_, err = p.stateStore.PruneStates(base, height, evRetainHeight)
 		if err != nil {
 			return 0, 0, ErrFailedToPruneStates{Height: height, Err: err}
