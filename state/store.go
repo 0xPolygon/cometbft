@@ -491,7 +491,7 @@ func (store dbStore) PruneABCIResponses(targetRetainHeight int64, forceCompact b
 		}
 		batchPruned++
 		if batchPruned >= 1000 {
-			if err := batch.Write(); err != nil {
+			if err := batch.WriteSync(); err != nil {
 				return pruned, lastRetainHeight + pruned, fmt.Errorf("failed to write ABCI responses deletion batch at height %d: %w", h, err)
 			}
 			batch.Close()
