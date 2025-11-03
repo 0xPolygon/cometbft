@@ -445,9 +445,6 @@ func (p *Pruner) pruneBlockIndexerToRetainHeight(lastRetainHeight int64) int64 {
 }
 
 func (p *Pruner) pruneBlocksToRetainHeight(lastRetainHeight int64) int64 {
-	p.logger.Info("block pruning skipped!", "currentHeight", lastRetainHeight)
-	return lastRetainHeight
-
 	targetRetainHeight := p.findMinBlockRetainHeight()
 	p.logger.Info("block pruning started", "currentHeight", lastRetainHeight, "targetRetainHeight", targetRetainHeight)
 	if targetRetainHeight == lastRetainHeight {
