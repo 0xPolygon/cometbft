@@ -470,9 +470,6 @@ func (p *Pruner) pruneBlocksToRetainHeight(lastRetainHeight int64) int64 {
 }
 
 func (p *Pruner) pruneABCIResToRetainHeight(lastRetainHeight int64) int64 {
-	p.logger.Info("abcires pruning skipped!", "currentHeight", lastRetainHeight)
-	return lastRetainHeight
-
 	targetRetainHeight, err := p.stateStore.GetABCIResRetainHeight()
 	p.logger.Info("abcires pruning started", "currentHeight", lastRetainHeight, "targetRetainHeight", targetRetainHeight)
 	if err != nil {
