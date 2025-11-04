@@ -161,7 +161,7 @@ func (txi *TxIndex) Prune(retainHeight int64) (int64, int64, error) {
 			lastHeightKey = hk // remember for resume
 
 			// Optional: fetch tx result and stage event-index keys
-			if val, gerr := txi.store.Get(itr.Value()); gerr == nil && len(val) > 0 {
+			if val, gerr := dbm.GetWithOpts(txi.store, itr.Value(), &dbm.ReadOptions{DontFillCache: true}); gerr == nil && len(val) > 0 {
 				result.Reset()
 				if uerr := proto.Unmarshal(val, &result); uerr == nil {
 					if evKeys, eerr := txi.collectEventKeysToDelete(&result); eerr == nil && len(evKeys) > 0 {
