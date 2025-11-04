@@ -11,7 +11,8 @@ import (
 )
 
 const (
-	MaxCompactionInterval = 100000
+	MaxCompactionInterval      = 100000
+	WaitTimeBetweenCompactions = 2 * time.Millisecond // prevents RSS/OS page cache from ballooning and smooth I/O
 )
 
 // KeyFunc maps an integer (e.g., block height) to a DB key.
@@ -124,6 +125,8 @@ func CompactSharded256(db dbm.DB, label string) error {
 
 // CompactAndLog compacts [start, limit) and logs the range and duration.
 func CompactAndLog(db dbm.DB, start, limit []byte, label string) error {
+	time.Sleep(WaitTimeBetweenCompactions)
+
 	rng := fmt.Sprintf("[%s, %s)", prettyKey(start), prettyKey(limit))
 	log.Printf("compacting %s range %s ...", label, rng)
 
