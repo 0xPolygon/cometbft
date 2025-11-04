@@ -1,10 +1,13 @@
 package state
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
+	"time"
 
 	"github.com/cosmos/gogoproto/proto"
 
@@ -25,11 +28,13 @@ const (
 	// https://github.com/tendermint/tendermint/pull/3438
 	// 100000 results in ~ 100ms to get 100 validators (see BenchmarkLoadValidators)
 	valSetCheckpointInterval = 100000
+	sleepPerBatch            = 2 * time.Millisecond
 )
 
 var (
 	ErrKeyNotFound        = errors.New("key not found")
 	ErrInvalidHeightValue = errors.New("invalid height value")
+	abciResponsesPrefix   = []byte("abciResponsesKey:")
 )
 
 //------------------------------------------------------------------------
@@ -44,6 +49,22 @@ func calcConsensusParamsKey(height int64) []byte {
 
 func calcABCIResponsesKey(height int64) []byte {
 	return []byte(fmt.Sprintf("abciResponsesKey:%v", height))
+}
+
+// parseABCIResponsesKey checks if key has the prefix and returns (ok, height).
+func parseABCIResponsesKey(key []byte) (bool, int64) {
+	if !bytes.HasPrefix(key, abciResponsesPrefix) {
+		return false, 0
+	}
+	// Extract the suffix part (height as bytes)
+	suffix := key[len(abciResponsesPrefix):]
+
+	// Parse it as int64
+	height, err := strconv.ParseInt(string(suffix), 10, 64)
+	if err != nil {
+		return false, 0
+	}
+	return true, height
 }
 
 // ----------------------
@@ -475,6 +496,17 @@ func (store dbStore) PruneABCIResponses(targetRetainHeight int64, forceCompact b
 	if lastRetainHeight == 0 {
 		lastRetainHeight = 1
 	}
+	it, err := store.db.Iterator(calcABCIResponsesKey(lastRetainHeight), nil)
+	if err != nil {
+		return 0, lastRetainHeight, fmt.Errorf("failed to find first available key to delete")
+	}
+	if it.Valid() {
+		if ok, firstHeightToDelete := parseABCIResponsesKey(it.Key()); ok {
+			log.Printf("abcires pruning: replaced lastRetainHeight=%d by firstHeightToDelete=%d", lastRetainHeight, firstHeightToDelete)
+			lastRetainHeight = firstHeightToDelete
+		}
+	}
+	it.Close()
 
 	batch := store.db.NewBatch()
 	defer batch.Close()
@@ -503,6 +535,9 @@ func (store dbStore) PruneABCIResponses(targetRetainHeight int64, forceCompact b
 			}
 
 			batch = store.db.NewBatch()
+
+			// Light throttle to let fsync catch up
+			time.Sleep(sleepPerBatch)
 		}
 	}
 	if err = batch.WriteSync(); err != nil {
