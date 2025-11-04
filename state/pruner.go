@@ -12,6 +12,10 @@ import (
 	"github.com/cometbft/cometbft/state/txindex"
 )
 
+const (
+	WaitTimeBeforeInitiatePruning = 5 * time.Minute
+)
+
 var (
 	AppRetainHeightKey            = []byte("AppRetainHeightKey")
 	CompanionBlockRetainHeightKey = []byte("DCBlockRetainHeightKey")
@@ -326,6 +330,8 @@ func (p *Pruner) GetBlockIndexerRetainHeight() (int64, error) {
 }
 
 func (p *Pruner) pruneABCIResponses() {
+	time.Sleep(WaitTimeBeforeInitiatePruning) // Waits before start so retainHeight is not 0
+
 	p.logger.Info("Started pruning ABCI responses", "interval", p.interval.String())
 	lastRetainHeight := int64(0)
 	for {
@@ -347,6 +353,8 @@ func (p *Pruner) pruneABCIResponses() {
 }
 
 func (p *Pruner) pruneBlocks() {
+	time.Sleep(WaitTimeBeforeInitiatePruning) // Waits before start so retainHeight is not 0
+
 	p.logger.Info("Started pruning blocks", "interval", p.interval.String())
 	lastRetainHeight := int64(0)
 	for {
@@ -368,6 +376,8 @@ func (p *Pruner) pruneBlocks() {
 }
 
 func (p *Pruner) pruneIndexesRoutine() {
+	time.Sleep(WaitTimeBeforeInitiatePruning) // Waits before start so retainHeight is not 0
+
 	p.logger.Info("Index pruner started", "interval", p.interval.String())
 	lastTxIndexerRetainHeight := int64(0)
 	lastBlockIndexerRetainHeight := int64(0)
