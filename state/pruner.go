@@ -422,7 +422,7 @@ func (p *Pruner) pruneTxIndexerToRetainHeight(lastRetainHeight int64) int64 {
 func (p *Pruner) pruneBlockIndexerToRetainHeight(lastRetainHeight int64) int64 {
 
 	targetRetainHeight, err := p.GetBlockIndexerRetainHeight()
-	p.logger.Info("block pruning started", "currentHeight", lastRetainHeight, "targetRetainHeight", targetRetainHeight)
+	p.logger.Info("block indexer pruning started", "currentHeight", lastRetainHeight, "targetRetainHeight", targetRetainHeight)
 	if err != nil {
 		return p.parseError(err, "blockIndexer", lastRetainHeight)
 	}
@@ -434,7 +434,7 @@ func (p *Pruner) pruneBlockIndexerToRetainHeight(lastRetainHeight int64) int64 {
 	tStart := time.Now()
 	numPrunedBlockIndexer, newBlockIndexerRetainHeight, err := p.blockIndexer.Prune(targetRetainHeight)
 	tElapsed := time.Since(tStart)
-	p.logger.Info("block pruning time", "elapsed", tElapsed.String(), "pruned", numPrunedBlockIndexer, "newBlockIndexerRetainHeight", newBlockIndexerRetainHeight)
+	p.logger.Info("block indexer pruning time", "elapsed", tElapsed.String(), "pruned", numPrunedBlockIndexer, "newBlockIndexerRetainHeight", newBlockIndexerRetainHeight)
 	if err != nil {
 		p.logger.Error("Failed to prune block indexer", "err", err, "targetRetainHeight", targetRetainHeight, "newBlockIndexerRetainHeight", newBlockIndexerRetainHeight)
 	} else if numPrunedBlockIndexer > 0 {
