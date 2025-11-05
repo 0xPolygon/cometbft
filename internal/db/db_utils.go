@@ -202,17 +202,15 @@ func CompactAndLog(db dbm.DB, start, limit []byte, label string) error {
 	time.Sleep(WaitTimeBetweenCompactions)
 
 	rng := fmt.Sprintf("[%s, %s)", prettyKey(start), prettyKey(limit))
-	log.Printf("compacting %s range %s ...", label, rng)
 
 	t0 := time.Now()
 	err := db.Compact(start, limit)
 	elapsed := time.Since(t0)
 
 	if err != nil {
-		log.Printf("compaction %s FAILED after %s: %v", label, elapsed, err)
+		log.Printf("compaction %s range %s FAILED after %s: %v", label, rng, elapsed, err)
 		return err
 	}
-	log.Printf("compaction %s DONE in %s", label, elapsed)
 	return nil
 }
 

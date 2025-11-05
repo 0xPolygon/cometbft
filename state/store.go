@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"log"
 	"strconv"
 	"time"
 
@@ -366,7 +365,6 @@ func (store dbStore) PruneStates(from int64, to int64, evidenceThresholdHeight i
 
 	// We have to delete in reverse order, to avoid deleting previous heights that have validator
 	// sets and consensus params that we may need to retrieve.
-	log.Printf("Starting prune state loop start=%d end=%d", to-1, from)
 	for h := to - 1; h >= from; h-- {
 		// For heights we keep, we must make sure they have the full validator set or consensus
 		// params, otherwise they will panic if they're retrieved directly (instead of
@@ -477,7 +475,6 @@ func (store dbStore) PruneStates(from int64, to int64, evidenceThresholdHeight i
 			store.StoreStateKeeper.StatesToCompact = 0
 		}
 	}
-	log.Printf("Finishing prune state loop start=%d end=%d", to-1, from)
 
 	return pruned, nil
 }
@@ -502,7 +499,6 @@ func (store dbStore) PruneABCIResponses(targetRetainHeight int64, forceCompact b
 	}
 	if it.Valid() {
 		if ok, firstHeightToDelete := parseABCIResponsesKey(it.Key()); ok {
-			log.Printf("abcires pruning: replaced lastRetainHeight=%d by firstHeightToDelete=%d", lastRetainHeight, firstHeightToDelete)
 			lastRetainHeight = firstHeightToDelete
 		}
 	}

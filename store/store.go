@@ -3,7 +3,6 @@ package store
 import (
 	"errors"
 	"fmt"
-	"log"
 	"strconv"
 
 	"github.com/cosmos/gogoproto/proto"
@@ -401,7 +400,6 @@ func (bs *BlockStore) PruneBlocks(height int64, state sm.State) (uint64, int64, 
 
 	evidencePoint := height
 	endHeight := height - 1
-	log.Printf("Starting prune blocks loop start=%d end=%d", base, height)
 	for h := base; h < height; h++ {
 
 		meta := bs.LoadBlockMeta(h)
