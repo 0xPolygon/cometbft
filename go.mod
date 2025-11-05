@@ -140,7 +140,7 @@ require (
 	gotest.tools v2.2.0+incompatible // indirect
 )
 
-replace github.com/cometbft/cometbft-db => github.com/lucca30/cometbft-db v0.14.1-lucca
+replace github.com/cometbft/cometbft-db => github.com/0xPolygon/cometbft-db v0.14.1-polygon
 
 retract (
 	// bumped go version in minor release
