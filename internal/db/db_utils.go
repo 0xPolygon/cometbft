@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	MaxCompactionInterval      = int64(100000)
+	MaxCompactionInterval      = int64(300000)
 	WaitTimeBetweenCompactions = 2 * time.Millisecond // prevents RSS/OS page cache from ballooning and smooth I/O
 )
 
