@@ -543,6 +543,12 @@ func (store dbStore) PruneABCIResponses(targetRetainHeight int64, forceCompact b
 		return pruned + batchPruned, targetRetainHeight, err
 	}
 
+	state, err := store.Load()
+	if err != nil {
+		return pruned + batchPruned, targetRetainHeight, err
+	}
+	initialHeight := state.InitialHeight
+
 	// forceCompact was introduced because in main and v1 there is no config to prune ABCI results
 	// and they are pruned only when instructed by the data companion (which does not exist here)
 	// When we do want to enfore pruning of the results with state pruning then
@@ -553,7 +559,7 @@ func (store dbStore) PruneABCIResponses(targetRetainHeight int64, forceCompact b
 		store.StoreStateKeeper.ResultsToCompact += uint64(pruned + batchPruned)
 		//nolint:staticcheck
 		if store.StoreStateKeeper.ResultsToCompact >= (uint64)(store.StoreOptions.CompactionInterval) {
-			db.CompactIntSharded(store.db, endHeight+1, db.MaxCompactionInterval, calcABCIResponsesKey, "pruneAbciResponses")
+			db.CompactIntSharded(store.db, initialHeight, endHeight+1, db.MaxCompactionInterval, calcABCIResponsesKey, "pruneAbciResponses")
 			store.StoreStateKeeper.ResultsToCompact = 0
 		}
 	}
