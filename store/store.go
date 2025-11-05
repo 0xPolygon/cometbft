@@ -473,14 +473,15 @@ func (bs *BlockStore) PruneBlocks(height int64, state sm.State) (uint64, int64, 
 		return calcBlockPartKey(h, 0)
 	}
 
+	initialHeight := state.InitialHeight
+
 	if bs.compact && bs.blocksToCompact >= bs.compactionInterval {
-		db.CompactPrefixHex256(bs.db, "BH:", "blockHashKeyRange on prune blocks") //BlockHashKeyRange
-		db.CompactIntSharded(bs.db, endHeight, db.MaxCompactionInterval, calcBlockMetaKey, "calcBlockMetaKey on prune blocks")
-		db.CompactIntSharded(bs.db, endHeight, db.MaxCompactionInterval, calcBlockCommitKey, "calcBlockCommitKey on prune blocks")
-		db.CompactIntSharded(bs.db, endHeight, db.MaxCompactionInterval, calcExtCommitKey, "calcExtCommitKey on prune blocks")
-		db.CompactIntSharded(bs.db, endHeight, db.MaxCompactionInterval, calcSeenCommitKey, "calcSeenCommitKey on prune blocks")
-		db.CompactIntSharded(bs.db, endHeight, db.MaxCompactionInterval, calcExtCommitKey, "calcExtCommitKey on prune blocks")
-		db.CompactIntSharded(bs.db, endHeight, db.MaxCompactionInterval, blockPartKey0, "blockPartKey0 on prune blocks")
+		db.CompactPrefixHex256(bs.db, "BH:", "pruneBlocksblockHashKeyRange") //BlockHashKeyRange
+		db.CompactIntSharded(bs.db, initialHeight, endHeight, db.MaxCompactionInterval, calcBlockMetaKey, "pruneBlockscalcBlockMetaKey")
+		db.CompactIntSharded(bs.db, initialHeight, endHeight, db.MaxCompactionInterval, calcBlockCommitKey, "pruneBlockscalcBlockCommitKey")
+		db.CompactIntSharded(bs.db, initialHeight, endHeight, db.MaxCompactionInterval, calcExtCommitKey, "pruneBlockscalcExtCommitKey")
+		db.CompactIntSharded(bs.db, initialHeight, endHeight, db.MaxCompactionInterval, calcSeenCommitKey, "pruneBlockscalcSeenCommitKey")
+		db.CompactIntSharded(bs.db, initialHeight, endHeight, db.MaxCompactionInterval, blockPartKey0, "pruneBlocksblockPartKey0")
 		bs.blocksToCompact = 0
 	}
 	return pruned, evidencePoint, err

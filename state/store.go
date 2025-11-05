@@ -459,14 +459,20 @@ func (store dbStore) PruneStates(from int64, to int64, evidenceThresholdHeight i
 	}
 	store.StoreStateKeeper.StatesToCompact += pruned
 
+	state, err := store.Load()
+	if err != nil {
+		return pruned, err
+	}
+	initialHeight := state.InitialHeight
+
 	// We do not want to panic or interrupt consensus on compaction failure
 	if store.StoreOptions.Compact {
 		store.StoreStateKeeper.StatesToCompact += pruned
 		if store.StoreStateKeeper.StatesToCompact >= uint64(store.StoreOptions.CompactionInterval) {
 			// Spliting Compaction by Key Range
-			db.CompactIntSharded(store.db, endHeight+1, db.MaxCompactionInterval, calcValidatorsKey, "calcValidatorsKey on state prune")
-			db.CompactIntSharded(store.db, endHeight+1, db.MaxCompactionInterval, calcConsensusParamsKey, "calcConsensusParamsKey on state prune")
-			db.CompactIntSharded(store.db, endHeight+1, db.MaxCompactionInterval, calcABCIResponsesKey, "calcABCIResponsesKey on state prune")
+			db.CompactIntSharded(store.db, initialHeight, endHeight+1, db.MaxCompactionInterval, calcValidatorsKey, "statePruneCalcValidatorsKey")
+			db.CompactIntSharded(store.db, initialHeight, endHeight+1, db.MaxCompactionInterval, calcConsensusParamsKey, "statePruneCalcConsensusParamsKey")
+			db.CompactIntSharded(store.db, initialHeight, endHeight+1, db.MaxCompactionInterval, calcABCIResponsesKey, "statePruneCalcABCIResponsesKey")
 
 			store.StoreStateKeeper.StatesToCompact = 0
 		}
@@ -547,7 +553,7 @@ func (store dbStore) PruneABCIResponses(targetRetainHeight int64, forceCompact b
 		store.StoreStateKeeper.ResultsToCompact += uint64(pruned + batchPruned)
 		//nolint:staticcheck
 		if store.StoreStateKeeper.ResultsToCompact >= (uint64)(store.StoreOptions.CompactionInterval) {
-			db.CompactIntSharded(store.db, endHeight+1, db.MaxCompactionInterval, calcABCIResponsesKey, "prune abci responses")
+			db.CompactIntSharded(store.db, endHeight+1, db.MaxCompactionInterval, calcABCIResponsesKey, "pruneAbciResponses")
 			store.StoreStateKeeper.ResultsToCompact = 0
 		}
 	}

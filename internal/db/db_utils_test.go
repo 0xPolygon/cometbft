@@ -9,27 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// spyDB embeds the real DB and overrides just CompactRange.
-// All other methods behave exactly like the underlying memdb.
-type spyDB struct {
-	dbm.DB             // embedded => methods promoted automatically
-	Calls  [][2][]byte // captured intervals [start,end)
-}
-
-func clone(b []byte) []byte { c := make([]byte, len(b)); copy(c, b); return c }
-
-// Override only the method you want to spy on.
-func (s *spyDB) CompactRange(start, end []byte) error {
-	s.Calls = append(s.Calls, [2][]byte{clone(start), clone(end)})
-
-	// Optionally forward to the underlying DB’s CompactRange (if it has one).
-	// Many memdbs just no-op this; forwarding keeps behavior identical.
-	if cr, ok := s.DB.(interface{ CompactRange([]byte, []byte) error }); ok {
-		return cr.CompactRange(start, end)
-	}
-	return nil
-}
-
 // helper: big-endian height key with a fixed domain prefix.
 func keyFn(prefix byte) KeyFunc {
 	return func(h int64) []byte {
@@ -78,7 +57,7 @@ func TestCompactIntSharded_DiscoveryStartsAtHugeFirstKey_NoGaps(t *testing.T) {
 	// Act: compact a small window to keep assertions simple.
 	end := huge + 23    // exclusive
 	maxSpan := int64(7) // expect: [huge,huge+7), [huge+7,huge+14), [huge+14,huge+21), [huge+21,huge+23)
-	err = CompactIntSharded(memdb, end, maxSpan, kf, label)
+	err = CompactIntSharded(memdb, huge, end, maxSpan, kf, label)
 	require.NoError(t, err)
 
 	// Assert 1: first interval starts at the HUGE discovered key.
@@ -138,7 +117,7 @@ func TestCompactIntSharded_ResumeFromStoredMeta_NoGaps(t *testing.T) {
 	// Session 1
 	end1 := huge + 15
 	maxSpan := int64(5) // shards: [huge,huge+5), [huge+5,huge+10), [huge+10,huge+15)
-	require.NoError(t, CompactIntSharded(memdb, end1, maxSpan, kf, label))
+	require.NoError(t, CompactIntSharded(memdb, huge, end1, maxSpan, kf, label))
 
 	// Verify persisted last compacted = end1-1
 	bz, err := memdb.Get(metaKey)
@@ -153,7 +132,7 @@ func TestCompactIntSharded_ResumeFromStoredMeta_NoGaps(t *testing.T) {
 
 	// Session 2 should resume at last1+1 == end1
 	end2 := huge + 28
-	require.NoError(t, CompactIntSharded(memdb, end2, maxSpan, kf, label))
+	require.NoError(t, CompactIntSharded(memdb, huge, end2, maxSpan, kf, label))
 
 	// EXPECTED shards in session 2: [end1,end1+5), [end1+5,end1+10), [end1+10,end2)
 	// i.e., [huge+15,huge+20), [huge+20,huge+25), [huge+25,huge+28)

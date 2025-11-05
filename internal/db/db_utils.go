@@ -1,12 +1,10 @@
 package db
 
 import (
-	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"log"
-	"math"
 	"time"
 	"unicode/utf8"
 
@@ -52,6 +50,8 @@ func makeMetaKey(metaPrefix []byte, label string) []byte {
 
 // CompactIntSharded compacts the integer interval [start, end) in shards of size <= maxSpan,
 // but the starting height is read from (and then persisted to) the DB.
+// Params details:
+//   - The initialHeigh is the one set on genesis, available on stateStore
 //
 // Persistence details:
 //   - Uses metaPrefix+label as a key to store the *last compacted height* (int64 BE).
@@ -64,6 +64,7 @@ func makeMetaKey(metaPrefix []byte, label string) []byte {
 // After each shard compaction, it stores lastCompactedHeight = e-1, so a restart can resume from (last+1).
 func CompactIntSharded(
 	db dbm.DB,
+	initialHeight int64,
 	end, maxSpan int64,
 	keyFn KeyFunc,
 	label string,
@@ -90,43 +91,7 @@ func CompactIntSharded(
 		}
 		start = last + 1 // resume *after* last compacted
 	} else {
-		// Discover first available key by iterating from keyFn(0).
-		lo := keyFn(0)
-		hi := keyFn(math.MaxInt64) // exclusive upper bound
-
-		it, err := db.Iterator(lo, hi)
-		if err != nil {
-			return err
-		}
-
-		if !it.Valid() {
-			// There are no keys in the domain -> nothing to do.
-			it.Close()
-			return nil
-		}
-		firstKey := bytes.Clone(it.Key())
-		it.Close()
-
-		// Validate firstKey is within [lo, hi)
-		if bytes.Compare(firstKey, lo) < 0 || bytes.Compare(firstKey, hi) >= 0 {
-			return fmt.Errorf("discovered key out of expected range")
-		}
-
-		// Binary search to find the smallest h such that keyFn(h) >= firstKey.
-		// (Since keyFn is strictly increasing, this is well-defined.)
-		var l int64 = 0
-		var r int64 = math.MaxInt64
-		for l < r {
-			m := l + (r-l)/2
-			km := keyFn(m)
-			if bytes.Compare(km, firstKey) < 0 {
-				l = m + 1
-			} else {
-				r = m
-			}
-		}
-		// l is the lower_bound index; start from there.
-		start = l
+		start = initialHeight
 	}
 
 	// Guard against overshoot or empty work.
