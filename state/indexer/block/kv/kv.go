@@ -194,10 +194,9 @@ func (idx *BlockerIndexer) Prune(retainHeight int64) (int64, int64, error) {
 		return 0, lastRetainHeight, err
 	}
 	idx.totalPrunedHeights += int64(deleted)
-	deleted = 0
 
 	if idx.compact && idx.totalPrunedHeights >= idx.compactionInterval {
-		db.CompactSharded256(idx.store, "block indexer")
+		_ = db.CompactSharded256(idx.store, "block indexer")
 		idx.totalPrunedHeights = 0
 	}
 
