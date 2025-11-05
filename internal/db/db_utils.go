@@ -1,9 +1,12 @@
 package db
 
 import (
+	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"log"
+	"math"
 	"time"
 	"unicode/utf8"
 
@@ -11,24 +14,123 @@ import (
 )
 
 const (
-	MaxCompactionInterval      = 100000
+	MaxCompactionInterval      = int64(100000)
 	WaitTimeBetweenCompactions = 2 * time.Millisecond // prevents RSS/OS page cache from ballooning and smooth I/O
 )
 
+var (
+	CompactPrefix = []byte("compact_")
+	compactAndLog = CompactAndLog
+)
+
 // KeyFunc maps an integer (e.g., block height) to a DB key.
+// It MUST be strictly increasing with respect to lexicographic order:
+//
+//	keyFn(h+1) > keyFn(h)   for all h.
 type KeyFunc func(int64) []byte
 
+// encodeI64BE / decodeI64BE store the last compacted height in 8 bytes (big-endian).
+func encodeI64BE(v int64) []byte {
+	var b [8]byte
+	binary.BigEndian.PutUint64(b[:], uint64(v))
+	return b[:]
+}
+func decodeI64BE(bz []byte) (int64, error) {
+	if len(bz) != 8 {
+		return 0, fmt.Errorf("invalid stored height bytes (len=%d)", len(bz))
+	}
+	return int64(binary.BigEndian.Uint64(bz)), nil
+}
+
+// makeMetaKey = metaPrefix || label
+func makeMetaKey(metaPrefix []byte, label string) []byte {
+	k := make([]byte, 0, len(metaPrefix)+len(label))
+	k = append(k, metaPrefix...)
+	k = append(k, []byte(label)...) // label scoping
+	return k
+}
+
 // CompactIntSharded compacts the integer interval [start, end) in shards of size <= maxSpan,
-// calling CompactAndLog for each shard using keyFn to map integers to keys.
-func CompactIntSharded(db dbm.DB, start, end, maxSpan int64, keyFn KeyFunc, label string) error {
+// but the starting height is read from (and then persisted to) the DB.
+//
+// Persistence details:
+//   - Uses metaPrefix+label as a key to store the *last compacted height* (int64 BE).
+//   - If none stored, discovers the start height by:
+//     (1) iterating from keyFn(0) to the first present key,
+//     (2) verifying the key is within [keyFn(0), keyFn(maxInt64)),
+//     (3) binary-searching for the smallest h with keyFn(h) >= firstKey (monotone property),
+//     and using that h as the starting height.
+//
+// After each shard compaction, it stores lastCompactedHeight = e-1, so a restart can resume from (last+1).
+func CompactIntSharded(
+	db dbm.DB,
+	end, maxSpan int64,
+	keyFn KeyFunc,
+	label string,
+) error {
 	if keyFn == nil {
 		return fmt.Errorf("keyFn must not be nil")
 	}
 	if maxSpan <= 0 {
 		return fmt.Errorf("maxSpan must be > 0")
 	}
-	if start >= end {
+	if end <= 0 {
 		// nothing to compact
+		return nil
+	}
+
+	// --- determine starting height from DB (or discover if not present) ---
+	metaKey := makeMetaKey(CompactPrefix, label)
+	var start int64
+
+	if bz, err := db.Get(metaKey); err == nil && bz != nil && len(bz) > 0 {
+		last, err := decodeI64BE(bz)
+		if err != nil {
+			return fmt.Errorf("failed to decode last compacted height: %w", err)
+		}
+		start = last + 1 // resume *after* last compacted
+	} else {
+		// Discover first available key by iterating from keyFn(0).
+		lo := keyFn(0)
+		hi := keyFn(math.MaxInt64) // exclusive upper bound
+
+		it, err := db.Iterator(lo, hi)
+		if err != nil {
+			return err
+		}
+
+		if !it.Valid() {
+			// There are no keys in the domain -> nothing to do.
+			it.Close()
+			return nil
+		}
+		firstKey := bytes.Clone(it.Key())
+		it.Close()
+
+		// Validate firstKey is within [lo, hi)
+		if bytes.Compare(firstKey, lo) < 0 || bytes.Compare(firstKey, hi) >= 0 {
+			return fmt.Errorf("discovered key out of expected range")
+		}
+
+		// Binary search to find the smallest h such that keyFn(h) >= firstKey.
+		// (Since keyFn is strictly increasing, this is well-defined.)
+		var l int64 = 0
+		var r int64 = math.MaxInt64
+		for l < r {
+			m := l + (r-l)/2
+			km := keyFn(m)
+			if bytes.Compare(km, firstKey) < 0 {
+				l = m + 1
+			} else {
+				r = m
+			}
+		}
+		// l is the lower_bound index; start from there.
+		start = l
+	}
+
+	// Guard against overshoot or empty work.
+	if start >= end {
 		return nil
 	}
 
@@ -40,10 +142,17 @@ func CompactIntSharded(db dbm.DB, start, end, maxSpan int64, keyFn KeyFunc, labe
 		}
 
 		shardLabel := fmt.Sprintf("%s [%d,%d)", label, s, e)
-		if err := CompactAndLog(db, keyFn(s), keyFn(e), shardLabel); err != nil {
+		if err := compactAndLog(db, keyFn(s), keyFn(e), shardLabel); err != nil {
 			return err
 		}
+
+		// Persist last compacted height = e-1 so we can resume at (e-1)+1 = e.
+		lastCompacted := e - 1
+		if err := db.Set(metaKey, encodeI64BE(lastCompacted)); err != nil {
+			return fmt.Errorf("failed to store last compacted height: %w", err)
+		}
 	}
+
 	log.Printf("compaction %s ALL SHARDS DONE in %s (range [%d,%d), maxSpan=%d)",
 		label, time.Since(allStart), start, end, maxSpan)
 	return nil
@@ -84,7 +193,7 @@ func CompactPrefixHex256(db dbm.DB, prefix string, label string) error {
 			shardLabel = fmt.Sprintf("%s %s ff-fg", label, prefix)
 		}
 
-		if err := CompactAndLog(db, start, end, shardLabel); err != nil {
+		if err := compactAndLog(db, start, end, shardLabel); err != nil {
 			return err
 		}
 	}
@@ -114,7 +223,7 @@ func CompactSharded256(db dbm.DB, label string) error {
 			shardLabel = fmt.Sprintf("%s shard %02x-%02x", label, b, b+1)
 		}
 
-		if err := CompactAndLog(db, start, end, shardLabel); err != nil {
+		if err := compactAndLog(db, start, end, shardLabel); err != nil {
 			return err
 		}
 	}

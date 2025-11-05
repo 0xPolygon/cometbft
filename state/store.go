@@ -137,11 +137,9 @@ type dbStore struct {
 }
 
 type StoreStateKeeper struct {
-	ResultsToCompact           uint64
-	StartResultHeightToCompact int64
+	ResultsToCompact uint64
 
-	StatesToCompact           uint64
-	StartStateHeightToCompact int64
+	StatesToCompact uint64
 }
 type StoreOptions struct {
 	// DiscardABCIResponses determines whether or not the store
@@ -364,7 +362,6 @@ func (store dbStore) PruneStates(from int64, to int64, evidenceThresholdHeight i
 	defer batch.Close()
 	pruned := uint64(0)
 
-	startHeight := from
 	endHeight := to - 1
 
 	// We have to delete in reverse order, to avoid deleting previous heights that have validator
@@ -464,15 +461,12 @@ func (store dbStore) PruneStates(from int64, to int64, evidenceThresholdHeight i
 
 	// We do not want to panic or interrupt consensus on compaction failure
 	if store.StoreOptions.Compact {
-		if store.StoreStateKeeper.StatesToCompact == 0 && pruned > 0 {
-			store.StoreStateKeeper.StartStateHeightToCompact = startHeight
-		}
 		store.StoreStateKeeper.StatesToCompact += pruned
 		if store.StoreStateKeeper.StatesToCompact >= uint64(store.StoreOptions.CompactionInterval) {
 			// Spliting Compaction by Key Range
-			db.CompactIntSharded(store.db, store.StoreStateKeeper.StartStateHeightToCompact, endHeight+1, db.MaxCompactionInterval, calcValidatorsKey, "calcValidatorsKey on state prune")
-			db.CompactIntSharded(store.db, store.StoreStateKeeper.StartStateHeightToCompact, endHeight+1, db.MaxCompactionInterval, calcConsensusParamsKey, "calcConsensusParamsKey on state prune")
-			db.CompactIntSharded(store.db, store.StoreStateKeeper.StartStateHeightToCompact, endHeight+1, db.MaxCompactionInterval, calcABCIResponsesKey, "calcABCIResponsesKey on state prune")
+			db.CompactIntSharded(store.db, endHeight+1, db.MaxCompactionInterval, calcValidatorsKey, "calcValidatorsKey on state prune")
+			db.CompactIntSharded(store.db, endHeight+1, db.MaxCompactionInterval, calcConsensusParamsKey, "calcConsensusParamsKey on state prune")
+			db.CompactIntSharded(store.db, endHeight+1, db.MaxCompactionInterval, calcABCIResponsesKey, "calcABCIResponsesKey on state prune")
 
 			store.StoreStateKeeper.StatesToCompact = 0
 		}
@@ -514,7 +508,6 @@ func (store dbStore) PruneABCIResponses(targetRetainHeight int64, forceCompact b
 	pruned := int64(0)
 	batchPruned := int64(0)
 
-	startHeight := lastRetainHeight
 	endHeight := targetRetainHeight - 1
 
 	for h := lastRetainHeight; h < targetRetainHeight; h++ {
@@ -550,14 +543,11 @@ func (store dbStore) PruneABCIResponses(targetRetainHeight int64, forceCompact b
 	// we can also check db.Compact
 	//nolint:staticcheck
 	if forceCompact || store.StoreOptions.Compact {
-		if store.StoreStateKeeper.ResultsToCompact == 0 && uint64(pruned+batchPruned) > 0 {
-			store.StoreStateKeeper.StartResultHeightToCompact = startHeight
-		}
 		//nolint:staticcheck
 		store.StoreStateKeeper.ResultsToCompact += uint64(pruned + batchPruned)
 		//nolint:staticcheck
 		if store.StoreStateKeeper.ResultsToCompact >= (uint64)(store.StoreOptions.CompactionInterval) {
-			db.CompactIntSharded(store.db, store.StoreStateKeeper.StartResultHeightToCompact, endHeight+1, db.MaxCompactionInterval, calcABCIResponsesKey, "prune abci responses")
+			db.CompactIntSharded(store.db, endHeight+1, db.MaxCompactionInterval, calcABCIResponsesKey, "prune abci responses")
 			store.StoreStateKeeper.ResultsToCompact = 0
 		}
 	}
