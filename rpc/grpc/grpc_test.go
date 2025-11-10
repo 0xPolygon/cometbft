@@ -15,7 +15,7 @@ import (
 func TestMain(m *testing.M) {
 	// start a CometBFT node in the background to test against
 	app := kvstore.NewInMemoryApplication()
-	node := rpctest.StartTendermint(app, true)
+	node := rpctest.StartTendermint(app)
 
 	code := m.Run()
 

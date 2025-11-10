@@ -618,7 +618,6 @@ func TestPruningService(t *testing.T) {
 		sm.WithPrunerObserver(obs),
 		sm.WithPrunerCompanionEnabled(),
 	)
-	pruner.DisableWaitAtStart()
 
 	err = pruner.SetApplicationBlockRetainHeight(1)
 	require.Error(t, err)

@@ -17,7 +17,7 @@ import (
 func ExampleHTTP_simple() {
 	// Start a CometBFT node (and kvstore) in the background to test against
 	app := kvstore.NewInMemoryApplication()
-	node := rpctest.StartTendermint(app, true, rpctest.SuppressStdout, rpctest.RecreateConfig)
+	node := rpctest.StartTendermint(app, rpctest.SuppressStdout, rpctest.RecreateConfig)
 	defer rpctest.StopTendermint(node)
 
 	// Create our RPC client
@@ -70,7 +70,7 @@ func ExampleHTTP_simple() {
 func ExampleHTTP_batching() {
 	// Start a CometBFT node (and kvstore) in the background to test against
 	app := kvstore.NewInMemoryApplication()
-	node := rpctest.StartTendermint(app, true, rpctest.SuppressStdout, rpctest.RecreateConfig)
+	node := rpctest.StartTendermint(app, rpctest.SuppressStdout, rpctest.RecreateConfig)
 
 	// Create our RPC client
 	rpcAddr := rpctest.GetConfig().RPC.ListenAddress
@@ -142,7 +142,7 @@ func ExampleHTTP_batching() {
 func ExampleHTTP_maxBatchSize() {
 	// Start a CometBFT node (and kvstore) in the background to test against
 	app := kvstore.NewInMemoryApplication()
-	node := rpctest.StartTendermint(app, true, rpctest.RecreateConfig, rpctest.SuppressStdout, rpctest.MaxReqBatchSize)
+	node := rpctest.StartTendermint(app, rpctest.RecreateConfig, rpctest.SuppressStdout, rpctest.MaxReqBatchSize)
 
 	// Change the max_request_batch_size
 	node.Config().RPC.MaxRequestBatchSize = 2

@@ -48,10 +48,6 @@ type Pruner struct {
 	// Deprecated: This field is unused and will be removed in a future release.
 	prunedStates          uint64 //nolint:unused,SA4006 // Deprecated
 	indexerPruningEnabled bool
-
-	// By default we wait before start so the first routine dont receives 0 when it shouldnt
-	// Disable this only for test purposes
-	disableWaitAtStart bool
 }
 
 type prunerConfig struct {
@@ -334,10 +330,6 @@ func (p *Pruner) GetBlockIndexerRetainHeight() (int64, error) {
 }
 
 func (p *Pruner) pruneABCIResponses() {
-	if !p.disableWaitAtStart {
-		time.Sleep(WaitTimeBeforeInitiatePruning) // Waits before start so retainHeight is not 0
-	}
-
 	p.logger.Info("Started pruning ABCI responses", "interval", p.interval.String())
 	lastRetainHeight := int64(0)
 	for {
@@ -359,10 +351,6 @@ func (p *Pruner) pruneABCIResponses() {
 }
 
 func (p *Pruner) pruneBlocks() {
-	if !p.disableWaitAtStart {
-		time.Sleep(WaitTimeBeforeInitiatePruning) // Waits before start so retainHeight is not 0
-	}
-
 	p.logger.Info("Started pruning blocks", "interval", p.interval.String())
 	lastRetainHeight := int64(0)
 	for {
@@ -384,9 +372,6 @@ func (p *Pruner) pruneBlocks() {
 }
 
 func (p *Pruner) pruneIndexesRoutine() {
-	if !p.disableWaitAtStart {
-		time.Sleep(WaitTimeBeforeInitiatePruning) // Waits before start so retainHeight is not 0
-	}
 	p.logger.Info("Index pruner started", "interval", p.interval.String())
 	lastTxIndexerRetainHeight := int64(0)
 	lastBlockIndexerRetainHeight := int64(0)
@@ -573,8 +558,4 @@ func (p *Pruner) pruneBlocksToHeight(height int64) (uint64, int64, error) {
 		}
 	}
 	return pruned, evRetainHeight, err
-}
-
-func (p *Pruner) DisableWaitAtStart() {
-	p.disableWaitAtStart = true
 }

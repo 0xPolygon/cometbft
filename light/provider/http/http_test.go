@@ -36,8 +36,7 @@ func TestNewProvider(t *testing.T) {
 func TestProvider(t *testing.T) {
 	app := kvstore.NewInMemoryApplication()
 	app.RetainBlocks = 10
-	app.Test = true
-	node := rpctest.StartTendermint(app, true)
+	node := rpctest.StartTendermint(app)
 
 	cfg := rpctest.GetConfig()
 	defer os.RemoveAll(cfg.RootDir)

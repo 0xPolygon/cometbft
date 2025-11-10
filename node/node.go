@@ -276,12 +276,11 @@ func NewNode(config *cfg.Config,
 	dbProvider cfg.DBProvider,
 	metricsProvider MetricsProvider,
 	logger log.Logger,
-	isTest bool,
 	options ...Option,
 ) (*Node, error) {
 	return NewNodeWithContext(context.TODO(), config, privValidator,
 		nodeKey, clientCreator, genesisDocProvider, dbProvider,
-		metricsProvider, logger, isTest, options...)
+		metricsProvider, logger, options...)
 }
 
 // NewNodeWithContext is cancellable version of NewNode.
@@ -294,7 +293,6 @@ func NewNodeWithContext(ctx context.Context,
 	dbProvider cfg.DBProvider,
 	metricsProvider MetricsProvider,
 	logger log.Logger,
-	isTest bool,
 	options ...Option,
 ) (*Node, error) {
 	blockStore, stateDB, err := initDBs(config, dbProvider)
@@ -395,7 +393,6 @@ func NewNodeWithContext(ctx context.Context,
 		blockStore,
 		smMetrics,
 		logger.With("module", "state"),
-		isTest,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create pruner: %w", err)
@@ -1009,7 +1006,6 @@ func createPruner(
 	blockStore *store.BlockStore,
 	metrics *sm.Metrics,
 	logger log.Logger,
-	isTest bool,
 ) (*sm.Pruner, error) {
 	if err := initApplicationRetainHeight(stateStore); err != nil {
 		return nil, err
@@ -1039,10 +1035,6 @@ func createPruner(
 	var err error
 	if config.Storage.Pruning.IndexerPruningEnabled {
 		err = initIndexerRetentionHeights(pruner)
-	}
-
-	if isTest {
-		pruner.DisableWaitAtStart()
 	}
 
 	return pruner, err
