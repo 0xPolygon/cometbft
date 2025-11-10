@@ -11,6 +11,7 @@ import (
 	dbm "github.com/cometbft/cometbft-db"
 
 	"github.com/cometbft/cometbft/evidence"
+	"github.com/cometbft/cometbft/internal/db"
 	cmtsync "github.com/cometbft/cometbft/libs/sync"
 	cmtstore "github.com/cometbft/cometbft/proto/tendermint/store"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
@@ -61,7 +62,7 @@ type BlockStore struct {
 	blockCommitCache         *lru.Cache[int64, *types.Commit]
 	blockExtendedCommitCache *lru.Cache[int64, *types.ExtendedCommit]
 
-	blocksDeleted      int64
+	blocksToCompact    int64
 	compact            bool
 	compactionInterval int64
 }
@@ -235,7 +236,10 @@ func (bs *BlockStore) LoadBlockPart(height int64, index int) *types.Part {
 // If no block is found for the given height, it returns nil.
 func (bs *BlockStore) LoadBlockMeta(height int64) *types.BlockMeta {
 	pbbm := new(cmtproto.BlockMeta)
-	bz, err := bs.db.Get(calcBlockMetaKey(height))
+	bz, err := dbm.GetWithOpts(bs.db, calcBlockMetaKey(height), &dbm.ReadOptions{
+		DontFillCache: true,
+	})
+
 	if err != nil {
 		panic(err)
 	}
@@ -395,6 +399,7 @@ func (bs *BlockStore) PruneBlocks(height int64, state sm.State) (uint64, int64, 
 	}
 
 	evidencePoint := height
+	endHeight := height - 1
 	for h := base; h < height; h++ {
 
 		meta := bs.LoadBlockMeta(h)
@@ -453,7 +458,6 @@ func (bs *BlockStore) PruneBlocks(height int64, state sm.State) (uint64, int64, 
 				return 0, -1, err
 			}
 			batch = bs.db.NewBatch()
-			defer batch.Close()
 		}
 	}
 
@@ -461,19 +465,22 @@ func (bs *BlockStore) PruneBlocks(height int64, state sm.State) (uint64, int64, 
 	if err != nil {
 		return 0, -1, err
 	}
-	bs.blocksDeleted += int64(pruned)
+	bs.blocksToCompact += int64(pruned)
 
-	if bs.compact && bs.blocksDeleted >= bs.compactionInterval {
-		// When the range is nil,nil, the database will try to compact
-		// ALL levels. Another option is to set a predefined range of
-		// specific keys.
-		err = bs.db.Compact(nil, nil)
-		if err == nil {
-			// If there was no error in compaction we reset the counter.
-			// Otherwise we preserve the number of blocks deleted so
-			// we can trigger compaction in the next pruning iteration
-			bs.blocksDeleted = 0
-		}
+	blockPartKey0 := func(h int64) []byte {
+		return calcBlockPartKey(h, 0)
+	}
+
+	initialHeight := state.InitialHeight
+
+	if bs.compact && bs.blocksToCompact >= bs.compactionInterval {
+		_ = db.CompactIntSharded(bs.db, initialHeight, endHeight, db.MaxCompactionInterval, calcBlockMetaKey, "pruneBlockscalcBlockMetaKey")
+		_ = db.CompactPrefixHex256(bs.db, "BH:", "pruneBlocksblockHashKeyRange") //BlockHashKeyRange
+		_ = db.CompactIntSharded(bs.db, initialHeight, endHeight, db.MaxCompactionInterval, calcBlockCommitKey, "pruneBlockscalcBlockCommitKey")
+		_ = db.CompactIntSharded(bs.db, initialHeight, endHeight, db.MaxCompactionInterval, calcExtCommitKey, "pruneBlockscalcExtCommitKey")
+		_ = db.CompactIntSharded(bs.db, initialHeight, endHeight, db.MaxCompactionInterval, calcSeenCommitKey, "pruneBlockscalcSeenCommitKey")
+		_ = db.CompactIntSharded(bs.db, initialHeight, endHeight, db.MaxCompactionInterval, blockPartKey0, "pruneBlocksblockPartKey0")
+		bs.blocksToCompact = 0
 	}
 	return pruned, evidencePoint, err
 }

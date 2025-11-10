@@ -4,12 +4,14 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/cosmos/gogoproto/proto"
 
 	dbm "github.com/cometbft/cometbft-db"
 
 	abci "github.com/cometbft/cometbft/abci/types"
+	"github.com/cometbft/cometbft/internal/db"
 	cmtmath "github.com/cometbft/cometbft/libs/math"
 	cmtos "github.com/cometbft/cometbft/libs/os"
 	cmtstate "github.com/cometbft/cometbft/proto/tendermint/state"
@@ -23,6 +25,7 @@ const (
 	// https://github.com/tendermint/tendermint/pull/3438
 	// 100000 results in ~ 100ms to get 100 validators (see BenchmarkLoadValidators)
 	valSetCheckpointInterval = 100000
+	sleepPerBatch            = 2 * time.Millisecond
 )
 
 var (
@@ -316,7 +319,7 @@ func (store dbStore) PruneStates(from int64, to int64, evidenceThresholdHeight i
 		return 0, fmt.Errorf("from height %v must be lower than to height %v", from, to)
 	}
 
-	valInfo, err := loadValidatorsInfo(store.db, min(to, evidenceThresholdHeight))
+	valInfo, err := loadValidatorsInfo(store.db, min(to, evidenceThresholdHeight), true)
 	if err != nil {
 		return 0, fmt.Errorf("validators at height %v not found: %w", to, err)
 	}
@@ -339,6 +342,8 @@ func (store dbStore) PruneStates(from int64, to int64, evidenceThresholdHeight i
 	defer batch.Close()
 	pruned := uint64(0)
 
+	endHeight := to - 1
+
 	// We have to delete in reverse order, to avoid deleting previous heights that have validator
 	// sets and consensus params that we may need to retrieve.
 	for h := to - 1; h >= from; h-- {
@@ -346,7 +351,7 @@ func (store dbStore) PruneStates(from int64, to int64, evidenceThresholdHeight i
 		// params, otherwise they will panic if they're retrieved directly (instead of
 		// indirectly via a LastHeightChanged pointer).
 		if keepVals[h] {
-			v, err := loadValidatorsInfo(store.db, h)
+			v, err := loadValidatorsInfo(store.db, h, true)
 			if err != nil || v.ValidatorSet == nil {
 				vip, err := store.LoadValidators(h)
 				if err != nil {
@@ -424,7 +429,6 @@ func (store dbStore) PruneStates(from int64, to int64, evidenceThresholdHeight i
 			}
 			batch.Close()
 			batch = store.db.NewBatch()
-			defer batch.Close()
 		}
 	}
 
@@ -434,17 +438,22 @@ func (store dbStore) PruneStates(from int64, to int64, evidenceThresholdHeight i
 	}
 	store.StoreStateKeeper.StatesToCompact += pruned
 
+	state, err := store.Load()
+	if err != nil {
+		return pruned, err
+	}
+	initialHeight := state.InitialHeight
+
 	// We do not want to panic or interrupt consensus on compaction failure
 	if store.StoreOptions.Compact {
 		store.StoreStateKeeper.StatesToCompact += pruned
 		if store.StoreStateKeeper.StatesToCompact >= uint64(store.StoreOptions.CompactionInterval) {
-			// When the range is nil,nil, the database will try to compact
-			// ALL levels. Another option is to set a predefined range of
-			// specific keys.
-			err = store.db.Compact(nil, nil)
-			if err == nil {
-				store.StoreStateKeeper.StatesToCompact = 0
-			}
+			// Spliting Compaction by Key Range
+			_ = db.CompactIntSharded(store.db, initialHeight, endHeight+1, db.MaxCompactionInterval, calcValidatorsKey, "statePruneCalcValidatorsKey")
+			_ = db.CompactIntSharded(store.db, initialHeight, endHeight+1, db.MaxCompactionInterval, calcConsensusParamsKey, "statePruneCalcConsensusParamsKey")
+			_ = db.CompactIntSharded(store.db, initialHeight, endHeight+1, db.MaxCompactionInterval, calcABCIResponsesKey, "statePruneCalcABCIResponsesKey")
+
+			store.StoreStateKeeper.StatesToCompact = 0
 		}
 	}
 
@@ -466,11 +475,20 @@ func (store dbStore) PruneABCIResponses(targetRetainHeight int64, forceCompact b
 		lastRetainHeight = 1
 	}
 
+	smallestFound, err := db.FindSmallestValueWithBrokenKeys(store.db, []byte("abciResponsesKey:"))
+	if err != nil {
+		return 0, lastRetainHeight, err
+	}
+
+	lastRetainHeight = int64(smallestFound)
+
 	batch := store.db.NewBatch()
 	defer batch.Close()
 
 	pruned := int64(0)
 	batchPruned := int64(0)
+
+	endHeight := targetRetainHeight
 
 	for h := lastRetainHeight; h < targetRetainHeight; h++ {
 		if err := batch.Delete(calcABCIResponsesKey(h)); err != nil {
@@ -478,7 +496,7 @@ func (store dbStore) PruneABCIResponses(targetRetainHeight int64, forceCompact b
 		}
 		batchPruned++
 		if batchPruned >= 1000 {
-			if err := batch.Write(); err != nil {
+			if err := batch.WriteSync(); err != nil {
 				return pruned, lastRetainHeight + pruned, fmt.Errorf("failed to write ABCI responses deletion batch at height %d: %w", h, err)
 			}
 			batch.Close()
@@ -490,28 +508,33 @@ func (store dbStore) PruneABCIResponses(targetRetainHeight int64, forceCompact b
 			}
 
 			batch = store.db.NewBatch()
-			defer batch.Close()
+
+			// Light throttle to let fsync catch up
+			time.Sleep(sleepPerBatch)
 		}
 	}
 	if err = batch.WriteSync(); err != nil {
 		return pruned + batchPruned, targetRetainHeight, err
 	}
 
+	state, err := store.Load()
+	if err != nil {
+		return pruned + batchPruned, targetRetainHeight, err
+	}
+	initialHeight := state.InitialHeight
+
 	// forceCompact was introduced because in main and v1 there is no config to prune ABCI results
 	// and they are pruned only when instructed by the data companion (which does not exist here)
 	// When we do want to enfore pruning of the results with state pruning then
-	// we can also check store.Compact
+	// we can also check db.Compact
 	//nolint:staticcheck
 	if forceCompact || store.StoreOptions.Compact {
 		//nolint:staticcheck
 		store.StoreStateKeeper.ResultsToCompact += uint64(pruned + batchPruned)
 		//nolint:staticcheck
 		if store.StoreStateKeeper.ResultsToCompact >= (uint64)(store.StoreOptions.CompactionInterval) {
-			err = store.db.Compact(nil, nil)
-			if err == nil {
-				//nolint:staticcheck
-				store.StoreStateKeeper.ResultsToCompact = 0
-			}
+			_ = db.CompactIntSharded(store.db, initialHeight, endHeight, db.MaxCompactionInterval, calcABCIResponsesKey, "pruneAbciResponses")
+			store.StoreStateKeeper.ResultsToCompact = 0
 		}
 	}
 	return pruned + batchPruned, targetRetainHeight, err
@@ -747,13 +770,13 @@ func (store dbStore) setLastABCIResponsesRetainHeight(height int64) error {
 // LoadValidators loads the ValidatorSet for a given height.
 // Returns ErrNoValSetForHeight if the validator set can't be found for this height.
 func (store dbStore) LoadValidators(height int64) (*types.ValidatorSet, error) {
-	valInfo, err := loadValidatorsInfo(store.db, height)
+	valInfo, err := loadValidatorsInfo(store.db, height, false)
 	if err != nil {
 		return nil, ErrNoValSetForHeight{height}
 	}
 	if valInfo.ValidatorSet == nil {
 		lastStoredHeight := lastStoredHeightFor(height, valInfo.LastHeightChanged)
-		valInfo2, err := loadValidatorsInfo(store.db, lastStoredHeight)
+		valInfo2, err := loadValidatorsInfo(store.db, lastStoredHeight, false)
 		if err != nil || valInfo2.ValidatorSet == nil {
 			return nil,
 				fmt.Errorf("couldn't find validators at height %d (height %d was originally requested): %w",
@@ -792,8 +815,8 @@ func lastStoredHeightFor(height, lastHeightChanged int64) int64 {
 }
 
 // CONTRACT: Returned ValidatorsInfo can be mutated.
-func loadValidatorsInfo(db dbm.DB, height int64) (*cmtstate.ValidatorsInfo, error) {
-	buf, err := db.Get(calcValidatorsKey(height))
+func loadValidatorsInfo(db dbm.DB, height int64, dontFillCache bool) (*cmtstate.ValidatorsInfo, error) {
+	buf, err := dbm.GetWithOpts(db, calcValidatorsKey(height), &dbm.ReadOptions{DontFillCache: dontFillCache})
 	if err != nil {
 		return nil, err
 	}

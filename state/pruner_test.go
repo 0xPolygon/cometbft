@@ -177,6 +177,7 @@ func createTestSetup(t *testing.T) (*sm.Pruner, *kv.TxIndex, blockidxkv.BlockerI
 	// tx indexer
 	memDB := db.NewMemDB()
 	txIndexer := kv.NewTxIndex(memDB)
+	txIndexer.SetLogger(log.TestingLogger().With("module", "txindex"))
 	blockIndexer := blockidxkv.New(db.NewPrefixDB(memDB, []byte("block_events")))
 
 	blockDB := db.NewMemDB()

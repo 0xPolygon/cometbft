@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"sort"
 	"strconv"
@@ -16,6 +17,7 @@ import (
 	dbm "github.com/cometbft/cometbft-db"
 
 	abci "github.com/cometbft/cometbft/abci/types"
+	"github.com/cometbft/cometbft/internal/db"
 	idxutil "github.com/cometbft/cometbft/internal/indexer"
 	"github.com/cometbft/cometbft/libs/log"
 	"github.com/cometbft/cometbft/libs/pubsub/query"
@@ -153,16 +155,22 @@ func (idx *BlockerIndexer) Prune(retainHeight int64) (int64, int64, error) {
 	defer itr.Close()
 
 	deleted := 0
-	affectedHeights := make(map[int64]struct{})
+	affectedHeights := 0
+	lastCountedHeight := int64(math.MinInt64)
+
 	for ; itr.Valid(); itr.Next() {
 		if keyBelongsToHeightRange(itr.Key(), lastRetainHeight, retainHeight) {
 			err := batch.Delete(itr.Key())
 			if err != nil {
 				return 0, lastRetainHeight, err
 			}
-			height := getHeightFromKey(itr.Key())
-			affectedHeights[height] = struct{}{}
 			deleted++
+			keyHeight := getHeightFromKey(itr.Key())
+
+			if keyHeight != lastCountedHeight {
+				affectedHeights++
+				lastCountedHeight = keyHeight
+			}
 		}
 		if deleted%1000 == 0 && deleted != 0 {
 			err = flush(batch)
@@ -172,7 +180,6 @@ func (idx *BlockerIndexer) Prune(retainHeight int64) (int64, int64, error) {
 			idx.totalPrunedHeights += int64(deleted)
 			deleted = 0
 			batch = idx.store.NewBatch()
-			defer closeBatch(batch)
 		}
 	}
 
@@ -181,20 +188,19 @@ func (idx *BlockerIndexer) Prune(retainHeight int64) (int64, int64, error) {
 		return 0, lastRetainHeight, errSetLastRetainHeight
 	}
 
-	if deleted > 0 {
-		idx.totalPrunedHeights += int64(deleted)
-		errWriteBatch := batch.WriteSync()
-		if errWriteBatch != nil {
-			return 0, lastRetainHeight, errWriteBatch
-		}
+	// always flush because setLastRetainHeight
+	err = flush(batch)
+	if err != nil {
+		return 0, lastRetainHeight, err
 	}
+	idx.totalPrunedHeights += int64(deleted)
 
 	if idx.compact && idx.totalPrunedHeights >= idx.compactionInterval {
-		_ = idx.store.Compact(nil, nil)
-		idx.totalPrunedHeights = idx.totalPrunedHeights - idx.compactionInterval
+		_ = db.CompactSharded256(idx.store, "block indexer")
+		idx.totalPrunedHeights = 0
 	}
 
-	return int64(len(affectedHeights)), retainHeight, err
+	return int64(affectedHeights), retainHeight, err
 }
 
 func (idx *BlockerIndexer) SetRetainHeight(retainHeight int64) error {

@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"golang.org/x/net/context"
 
@@ -41,8 +42,8 @@ func TestGRPC(t *testing.T) {
 	})
 
 	// Connect to the socket
-	//nolint:staticcheck // SA1019 Existing use of deprecated but supported dial option.
-	conn, err := grpc.Dial(socket, grpc.WithInsecure(), grpc.WithContextDialer(dialerFunc))
+
+	conn, err := grpc.NewClient(socket, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(dialerFunc))
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
