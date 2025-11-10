@@ -75,6 +75,7 @@ func DefaultNewNode(config *cfg.Config, logger log.Logger) (*Node, error) {
 		cfg.DefaultDBProvider,
 		DefaultMetricsProvider(config.Instrumentation),
 		logger,
+		false,
 	)
 }
 

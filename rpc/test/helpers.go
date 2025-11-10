@@ -125,12 +125,12 @@ func GetGRPCClient() core_grpc.BroadcastAPIClient {
 }
 
 // StartTendermint starts a test CometBFT server in a go routine and returns when it is initialized
-func StartTendermint(app abci.Application, opts ...func(*Options)) *nm.Node {
+func StartTendermint(app abci.Application, isTest bool, opts ...func(*Options)) *nm.Node {
 	nodeOpts := defaultOptions
 	for _, opt := range opts {
 		opt(&nodeOpts)
 	}
-	node := NewTendermint(app, &nodeOpts)
+	node := NewTendermint(app, isTest, &nodeOpts)
 	err := node.Start()
 	if err != nil {
 		panic(err)
@@ -158,7 +158,7 @@ func StopTendermint(node *nm.Node) {
 }
 
 // NewTendermint creates a new CometBFT server and sleeps forever
-func NewTendermint(app abci.Application, opts *Options) *nm.Node {
+func NewTendermint(app abci.Application, isTest bool, opts *Options) *nm.Node {
 	// Create & start node
 	config := GetConfig(opts.recreateConfig)
 	var logger log.Logger
@@ -183,7 +183,7 @@ func NewTendermint(app abci.Application, opts *Options) *nm.Node {
 		nm.DefaultGenesisDocProviderFunc(config),
 		cfg.DefaultDBProvider,
 		nm.DefaultMetricsProvider(config.Instrumentation),
-		logger)
+		logger, isTest)
 	if err != nil {
 		panic(err)
 	}

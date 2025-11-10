@@ -54,6 +54,8 @@ type Application struct {
 
 	// Generate blobs
 	generateBlobs bool
+
+	Test bool // is test application
 }
 
 // NewApplication creates an instance of the kvstore from the provided database

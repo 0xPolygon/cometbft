@@ -1,10 +1,12 @@
 package db
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"log"
+	"strconv"
 	"time"
 	"unicode/utf8"
 
@@ -235,4 +237,59 @@ func isASCIIPrintable(b []byte) bool {
 		}
 	}
 	return true
+}
+
+// findSmallestValueWithBrokenKeys attempts to find the smallest numeric value
+// among keys that share a given prefix.
+//
+// Note: The key format is **not properly designed** — numeric values are
+// concatenated as plain strings (e.g. "SC:2", "SC:10"), which causes lexicographic
+// rather than numeric ordering. This function compensates for that by iterating
+// through possible first digits and parsing keys manually.
+//
+// Example key set: "SC:2", "SC:10", "SC:3" → returns 2
+//
+// This is a workaround and should be replaced when the key schema is improved.
+func FindSmallestValueWithBrokenKeys(db dbm.DB, prefix []byte) (int, error) {
+	var smallest *int
+
+	// We assume numeric suffixes can start with digits 0–9
+	for d := byte('0'); d <= byte('9'); d++ {
+		start := append(append([]byte{}, prefix...), d)
+		it, err := db.Iterator(start, nil)
+		if err != nil {
+			return 0, fmt.Errorf("failed to iterate prefix %q: %w", start, err)
+		}
+
+		for ; it.Valid(); it.Next() {
+			key := it.Key()
+			if !bytes.HasPrefix(key, prefix) {
+				break // passed beyond the prefix
+			}
+
+			// Extract numeric part after prefix
+			suffix := bytes.TrimPrefix(key, prefix)
+			if len(suffix) == 0 {
+				continue
+			}
+
+			n, err := strconv.Atoi(string(suffix))
+			if err != nil {
+				// Skip non-numeric keys gracefully
+				continue
+			}
+
+			if smallest == nil || n < *smallest {
+				smallest = &n
+			}
+		}
+
+		it.Close()
+	}
+
+	if smallest == nil {
+		return 0, fmt.Errorf("no valid numeric keys found for prefix %q", prefix)
+	}
+
+	return *smallest, nil
 }

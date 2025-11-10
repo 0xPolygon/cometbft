@@ -493,16 +493,13 @@ func (store dbStore) PruneABCIResponses(targetRetainHeight int64, forceCompact b
 	if lastRetainHeight == 0 {
 		lastRetainHeight = 1
 	}
-	it, err := store.db.Iterator(calcABCIResponsesKey(lastRetainHeight), nil)
+
+	smallestFound, err := db.FindSmallestValueWithBrokenKeys(store.db, []byte("abciResponsesKey:"))
 	if err != nil {
-		return 0, lastRetainHeight, fmt.Errorf("failed to find first available key to delete")
+		return 0, lastRetainHeight, err
 	}
-	if it.Valid() {
-		if ok, firstHeightToDelete := parseABCIResponsesKey(it.Key()); ok {
-			lastRetainHeight = firstHeightToDelete
-		}
-	}
-	it.Close()
+
+	lastRetainHeight = int64(smallestFound)
 
 	batch := store.db.NewBatch()
 	defer batch.Close()
@@ -510,7 +507,7 @@ func (store dbStore) PruneABCIResponses(targetRetainHeight int64, forceCompact b
 	pruned := int64(0)
 	batchPruned := int64(0)
 
-	endHeight := targetRetainHeight - 1
+	endHeight := targetRetainHeight
 
 	for h := lastRetainHeight; h < targetRetainHeight; h++ {
 		if err := batch.Delete(calcABCIResponsesKey(h)); err != nil {
@@ -555,7 +552,7 @@ func (store dbStore) PruneABCIResponses(targetRetainHeight int64, forceCompact b
 		store.StoreStateKeeper.ResultsToCompact += uint64(pruned + batchPruned)
 		//nolint:staticcheck
 		if store.StoreStateKeeper.ResultsToCompact >= (uint64)(store.StoreOptions.CompactionInterval) {
-			_ = db.CompactIntSharded(store.db, initialHeight, endHeight+1, db.MaxCompactionInterval, calcABCIResponsesKey, "pruneAbciResponses")
+			_ = db.CompactIntSharded(store.db, initialHeight, endHeight, db.MaxCompactionInterval, calcABCIResponsesKey, "pruneAbciResponses")
 			store.StoreStateKeeper.ResultsToCompact = 0
 		}
 	}
