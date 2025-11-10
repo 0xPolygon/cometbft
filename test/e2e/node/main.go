@@ -140,6 +140,7 @@ func startNode(cfg *Config) error {
 		config.DefaultDBProvider,
 		node.DefaultMetricsProvider(cmtcfg.Instrumentation),
 		nodeLogger,
+		false,
 	)
 	if err != nil {
 		return err

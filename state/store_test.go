@@ -479,6 +479,7 @@ func TestFinalizeBlockResponsePruning(t *testing.T) {
 			sm.WithPrunerObserver(obs),
 			sm.WithPrunerCompanionEnabled(),
 		)
+		pruner.DisableWaitAtStart()
 
 		// Check that we have written a finalize block result at height 'height - 1'
 		_, err = stateStore.LoadFinalizeBlockResponse(height - 1)

@@ -459,6 +459,7 @@ func TestNodeNewNodeCustomReactors(t *testing.T) {
 		cfg.DefaultDBProvider,
 		DefaultMetricsProvider(config.Instrumentation),
 		log.TestingLogger(),
+		true,
 		CustomReactors(map[string]p2p.Reactor{"FOO": cr, "BLOCKSYNC": customBlocksyncReactor}),
 	)
 	require.NoError(t, err)

@@ -1,11 +1,9 @@
 package state
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/cosmos/gogoproto/proto"
@@ -33,7 +31,6 @@ const (
 var (
 	ErrKeyNotFound        = errors.New("key not found")
 	ErrInvalidHeightValue = errors.New("invalid height value")
-	abciResponsesPrefix   = []byte("abciResponsesKey:")
 )
 
 //------------------------------------------------------------------------
@@ -48,22 +45,6 @@ func calcConsensusParamsKey(height int64) []byte {
 
 func calcABCIResponsesKey(height int64) []byte {
 	return []byte(fmt.Sprintf("abciResponsesKey:%v", height))
-}
-
-// parseABCIResponsesKey checks if key has the prefix and returns (ok, height).
-func parseABCIResponsesKey(key []byte) (bool, int64) {
-	if !bytes.HasPrefix(key, abciResponsesPrefix) {
-		return false, 0
-	}
-	// Extract the suffix part (height as bytes)
-	suffix := key[len(abciResponsesPrefix):]
-
-	// Parse it as int64
-	height, err := strconv.ParseInt(string(suffix), 10, 64)
-	if err != nil {
-		return false, 0
-	}
-	return true, height
 }
 
 // ----------------------
