@@ -9,15 +9,15 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
 	"github.com/cometbft/cometbft/crypto"
 	"github.com/cometbft/cometbft/crypto/ed25519"
+	cryptoenc "github.com/cometbft/cometbft/crypto/encoding"
 	"github.com/cometbft/cometbft/crypto/sr25519"
 	cmtmath "github.com/cometbft/cometbft/libs/math"
 	cmtrand "github.com/cometbft/cometbft/libs/rand"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestValidatorSetBasic(t *testing.T) {
@@ -471,6 +471,25 @@ func TestValidatorSetTotalVotingPowerPanicsOnOverflow(t *testing.T) {
 	assert.Panics(t, shouldPanic)
 }
 
+func TestValidatorSetFromProtoReturnsErrorOnOverflow(t *testing.T) {
+	// ValidatorSetFromProto should return an error instead of panicking when total voting power exceeds MaxTotalVotingPower.
+	pubKey := ed25519.GenPrivKey().PubKey()
+	pkProto, err := cryptoenc.PubKeyToProto(pubKey)
+	require.NoError(t, err)
+
+	protoVals := &cmtproto.ValidatorSet{
+		Validators: []*cmtproto.Validator{
+			{Address: pubKey.Address(), PubKey: pkProto, VotingPower: math.MaxInt64, ProposerPriority: 0},
+			{Address: pubKey.Address(), PubKey: pkProto, VotingPower: math.MaxInt64, ProposerPriority: 0},
+		},
+		Proposer: &cmtproto.Validator{Address: pubKey.Address(), PubKey: pkProto, VotingPower: math.MaxInt64, ProposerPriority: 0},
+	}
+
+	_, err = ValidatorSetFromProto(protoVals)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exceeds maximum")
+}
+
 func TestAvgProposerPriority(t *testing.T) {
 	// Create Validator set without calling IncrementProposerPriority:
 	tcs := []struct {
@@ -832,7 +851,8 @@ func verifyValidatorSet(t *testing.T, valSet *ValidatorSet) {
 
 	// verify that the set's total voting power has been updated
 	tvp := valSet.totalVotingPower
-	valSet.updateTotalVotingPower()
+	err := valSet.updateTotalVotingPower()
+	require.NoError(t, err)
 	expectedTvp := valSet.TotalVotingPower()
 	assert.Equal(t, expectedTvp, tvp,
 		"expected TVP %d. Got %d, valSet=%s", expectedTvp, tvp, valSet)
