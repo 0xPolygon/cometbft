@@ -133,7 +133,10 @@ func (blockExec *BlockExecutor) CreateProposalBlock(
 
 	txs := blockExec.mempool.ReapMaxBytesMaxGas(maxReapBytes, maxGas)
 	commit := lastExtCommit.ToCommit()
-	block := state.MakeBlock(height, txs, commit, evidence, proposerAddr)
+	block, err := state.MakeBlock(height, txs, commit, evidence, proposerAddr)
+	if err != nil {
+		return nil, nil, err
+	}
 	rpp, err := blockExec.proxyApp.PrepareProposal(
 		ctx,
 		&abci.RequestPrepareProposal{
@@ -164,10 +167,11 @@ func (blockExec *BlockExecutor) CreateProposalBlock(
 		return nil, nil, err
 	}
 
-	var (
-		preparedBlock = state.MakeBlock(height, txl, commit, evidence, proposerAddr)
-		blob          = rpp.Blob
-	)
+	preparedBlock, err := state.MakeBlock(height, txl, commit, evidence, proposerAddr)
+	if err != nil {
+		return nil, nil, err
+	}
+	blob := rpp.Blob
 
 	if len(blob) > types.MaxBlobSizeBytes {
 		return nil, nil, fmt.Errorf("blob size %d exceeds limit MaxBlobSizeBytes=%d", len(blob), types.MaxBlobSizeBytes)

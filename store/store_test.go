@@ -85,7 +85,10 @@ func makeStateAndBlockStoreAndIndexers(testName string) (sm.State, *BlockStore, 
 // Helper to create and save a batch of blocks (optionally updating stateStore)
 func saveBlocks(bs *BlockStore, state sm.State, stateStore sm.Store, from, to int64, updateStateStore bool) {
 	for h := from; h <= to; h++ {
-		block := state.MakeBlock(h, test.MakeNTxs(h, 10), new(types.Commit), nil, state.Validators.GetProposer().Address)
+		block, err := state.MakeBlock(h, test.MakeNTxs(h, 10), new(types.Commit), nil, state.Validators.GetProposer().Address)
+		if err != nil {
+			panic(err)
+		}
 		partSet, err := block.MakePartSet(types.PartSizeBytes)
 		if err != nil {
 			panic(err)
@@ -188,7 +191,8 @@ func TestBlockStoreSaveLoadBlock(t *testing.T) {
 
 	// save a block big enough to have two block parts
 	txs := []types.Tx{make([]byte, types.PartSizeBytes)} // TX taking one block part alone
-	block := state.MakeBlock(bs.Height()+1, txs, new(types.Commit), nil, state.Validators.GetProposer().Address)
+	block, err := state.MakeBlock(bs.Height()+1, txs, new(types.Commit), nil, state.Validators.GetProposer().Address)
+	require.NoError(t, err)
 	validPartSet, err := block.MakePartSet(types.PartSizeBytes)
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, validPartSet.Total(), uint32(2))
@@ -430,7 +434,8 @@ func TestSaveBlockWithExtendedCommitPanicOnAbsentExtension(t *testing.T) {
 			state, bs, _, _, cleanup, _ := makeStateAndBlockStoreAndIndexers(testCase.name)
 			defer cleanup()
 			h := bs.Height() + 1
-			block := state.MakeBlock(h, test.MakeNTxs(h, 10), new(types.Commit), nil, state.Validators.GetProposer().Address)
+			block, err := state.MakeBlock(h, test.MakeNTxs(h, 10), new(types.Commit), nil, state.Validators.GetProposer().Address)
+			require.NoError(t, err)
 
 			seenCommit := makeTestExtCommit(block.Height, cmttime.Now())
 			ps, err := block.MakePartSet(types.PartSizeBytes)
@@ -471,7 +476,8 @@ func TestLoadBlockExtendedCommit(t *testing.T) {
 			state, bs, _, _, cleanup, _ := makeStateAndBlockStoreAndIndexers(testCase.name)
 			defer cleanup()
 			h := bs.Height() + 1
-			block := state.MakeBlock(h, test.MakeNTxs(h, 10), new(types.Commit), nil, state.Validators.GetProposer().Address)
+			block, err := state.MakeBlock(h, test.MakeNTxs(h, 10), new(types.Commit), nil, state.Validators.GetProposer().Address)
+			require.NoError(t, err)
 			seenCommit := makeTestExtCommit(block.Height, cmttime.Now())
 			ps, err := block.MakePartSet(types.PartSizeBytes)
 			require.NoError(t, err)
@@ -540,7 +546,8 @@ func TestLoadBlockPart(t *testing.T) {
 	require.Contains(t, panicErr.Error(), "unmarshal to cmtproto.Part failed")
 
 	// 3. A good block serialized and saved to the DB should be retrievable
-	block := state.MakeBlock(height, nil, new(types.Commit), nil, state.Validators.GetProposer().Address)
+	block, err := state.MakeBlock(height, nil, new(types.Commit), nil, state.Validators.GetProposer().Address)
+	require.NoError(t, err)
 	partSet, err := block.MakePartSet(types.PartSizeBytes)
 	require.NoError(t, err)
 	part1 := partSet.GetPart(0)
@@ -895,7 +902,8 @@ func TestLoadBlockMetaByHash(t *testing.T) {
 	require.NoError(t, err)
 	bs := NewBlockStore(dbm.NewMemDB())
 
-	b1 := state.MakeBlock(state.LastBlockHeight+1, test.MakeNTxs(state.LastBlockHeight+1, 10), new(types.Commit), nil, state.Validators.GetProposer().Address)
+	b1, err := state.MakeBlock(state.LastBlockHeight+1, test.MakeNTxs(state.LastBlockHeight+1, 10), new(types.Commit), nil, state.Validators.GetProposer().Address)
+	require.NoError(t, err)
 	partSet, err := b1.MakePartSet(types.PartSizeBytes)
 	require.NoError(t, err)
 	seenCommit := makeTestExtCommit(1, cmttime.Now())
@@ -912,7 +920,8 @@ func TestBlockFetchAtHeight(t *testing.T) {
 	defer cleanup()
 
 	require.Equal(t, bs.Height(), int64(0), "initially the height should be zero")
-	block := state.MakeBlock(bs.Height()+1, nil, new(types.Commit), nil, state.Validators.GetProposer().Address)
+	block, err := state.MakeBlock(bs.Height()+1, nil, new(types.Commit), nil, state.Validators.GetProposer().Address)
+	require.NoError(t, err)
 
 	partSet, err := block.MakePartSet(types.PartSizeBytes)
 	require.NoError(t, err)
