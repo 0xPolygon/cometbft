@@ -70,7 +70,7 @@ func TestCacheAfterUpdate(t *testing.T) {
 			require.NoError(t, err)
 		}
 
-		updateTxs := []types.Tx{}
+		updateTxs := []types.Tx{} //nolint:prealloc
 		for _, v := range tc.updateIndices {
 			tx := kvstore.NewTx(fmt.Sprintf("%d", v), "value")
 			updateTxs = append(updateTxs, tx)

@@ -100,7 +100,7 @@ func (env *Environment) UnsafeDialPeers(
 //nolint:govet
 func (env *Environment) Genesis(*rpctypes.Context) (*ctypes.ResultGenesis, error) {
 	return nil, errors.New("endpoint is disabled due to large genesis file size")
-
+	//nolint:govet
 	if len(env.genChunks) > 1 {
 		return nil, errors.New("genesis response is large, please use the genesis_chunked API instead")
 	}
@@ -111,6 +111,7 @@ func (env *Environment) Genesis(*rpctypes.Context) (*ctypes.ResultGenesis, error
 //nolint:govet
 func (env *Environment) GenesisChunked(_ *rpctypes.Context, chunk uint) (*ctypes.ResultGenesisChunk, error) {
 	return nil, errors.New("endpoint is disabled due to large genesis file size")
+	//nolint:govet
 	if env.genChunks == nil {
 		return nil, fmt.Errorf("service configuration error, genesis chunks are not initialized")
 	}

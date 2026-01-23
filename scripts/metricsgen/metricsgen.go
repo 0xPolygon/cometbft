@@ -269,7 +269,7 @@ func extractHelpMessage(cg *ast.CommentGroup) string {
 	if cg == nil {
 		return ""
 	}
-	var help []string //nolint: prealloc
+	var help []string
 	for _, c := range cg.List {
 		mt := strings.TrimPrefix(c.Text, "//metrics:")
 		if mt != c.Text {
@@ -288,7 +288,7 @@ func extractLabels(bl *ast.BasicLit) string {
 	if bl != nil {
 		t := reflect.StructTag(strings.Trim(bl.Value, "`"))
 		if v := t.Get(labelsTag); v != "" {
-			var res []string
+			var res []string //nolint:prealloc
 			for _, s := range strings.Split(v, ",") {
 				res = append(res, strconv.Quote(strings.TrimSpace(s)))
 			}

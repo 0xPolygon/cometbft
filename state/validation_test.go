@@ -102,7 +102,7 @@ func TestValidateBlockHeader(t *testing.T) {
 			block, err := makeBlock(state, height, lastCommit)
 			require.NoError(t, err)
 			tc.malleateBlock(block)
-			err = blockExec.ValidateBlock(state, block)
+			_ = blockExec.ValidateBlock(state, block)
 		}
 
 		/*

@@ -261,7 +261,7 @@ func TestBadBlockStopsPeer(t *testing.T) {
 		require.NoError(t, err)
 	}()
 
-	reactorPairs := make([]ReactorPair, 4)
+	reactorPairs := make([]ReactorPair, 4) //nolint:prealloc
 
 	reactorPairs[0] = newReactor(t, log.TestingLogger(), genDoc, privVals, maxBlockHeight)
 	reactorPairs[1] = newReactor(t, log.TestingLogger(), genDoc, privVals, 0)
@@ -344,7 +344,7 @@ func TestCheckSwitchToConsensusLastHeightZero(t *testing.T) {
 
 	reactorPairs = append(reactorPairs, newReactor(t, log.TestingLogger(), genDoc, privVals, maxBlockHeight))
 
-	var switches []*p2p.Switch
+	var switches []*p2p.Switch //nolint:prealloc
 	for _, r := range reactorPairs {
 		switches = append(switches, p2p.MakeConnectedSwitches(config.P2P, 1, func(i int, s *p2p.Switch) *p2p.Switch {
 			s.AddReactor("BLOCKSYNC", r.reactor)
@@ -410,7 +410,7 @@ func ExtendedCommitNetworkHelper(t *testing.T, maxBlockHeight int64, enableVoteE
 
 	reactorPairs = append(reactorPairs, newReactor(t, log.TestingLogger(), genDoc, privVals, maxBlockHeight, invalidBlockHeightAt))
 
-	var switches []*p2p.Switch
+	var switches []*p2p.Switch //nolint:prealloc
 	for _, r := range reactorPairs {
 		switches = append(switches, p2p.MakeConnectedSwitches(config.P2P, 1, func(i int, s *p2p.Switch) *p2p.Switch {
 			s.AddReactor("BLOCKSYNC", r.reactor)

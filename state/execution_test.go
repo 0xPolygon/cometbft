@@ -399,11 +399,11 @@ func TestProcessProposal(t *testing.T) {
 
 	block0, err := makeBlock(state, height-1, new(types.Commit))
 	require.NoError(t, err)
-	lastCommitSig := []types.CommitSig{}
+	lastCommitSig := []types.CommitSig{} //nolint:prealloc
 	partSet, err := block0.MakePartSet(types.PartSizeBytes)
 	require.NoError(t, err)
 	blockID := types.BlockID{Hash: block0.Hash(), PartSetHeader: partSet.Header()}
-	voteInfos := []abci.VoteInfo{}
+	voteInfos := []abci.VoteInfo{} //nolint:prealloc
 	for _, privVal := range privVals {
 		pk, err := privVal.GetPubKey()
 		require.NoError(t, err)
