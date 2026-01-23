@@ -105,6 +105,22 @@ func (p *Proposal) ValidateBlockSize(maxBlockSizeBytes int64) error {
 	return nil
 }
 
+// ValidateBlobSize block size ensures that a proposal block is not larger
+// than a maximum number of bytes, based on the total amount of parts reported
+// in the PartSetHeader. If -1 is passed as the maxBlobSizeBytes,
+// types.MaxBlobSizeBytes will be used as the maximum.
+func (p *Proposal) ValidateBlobSize(maxBlobSizeBytes int64) error {
+	if maxBlobSizeBytes == -1 {
+		maxBlobSizeBytes = int64(MaxBlobSizeBytes)
+	}
+	totalParts := int64(p.BlobID.PartSetHeader.Total)
+	maxParts := (maxBlobSizeBytes-1)/int64(PartSizeBytes) + 1
+	if totalParts > maxParts {
+		return fmt.Errorf("proposal has too many parts %d (max: %d)", totalParts, maxParts)
+	}
+	return nil
+}
+
 // String returns a string representation of the Proposal.
 //
 // 1. height

@@ -322,8 +322,14 @@ func (conR *Reactor) Receive(e p2p.Envelope) {
 		case *ProposalMessage:
 			conR.conS.mtx.RLock()
 			maxBytes := conR.conS.state.ConsensusParams.Block.MaxBytes
+			maxBlobBytes := conR.conS.state.ConsensusParams.Blob.MaxBytes
 			conR.conS.mtx.RUnlock()
 			if err := msg.Proposal.ValidateBlockSize(maxBytes); err != nil {
+				conR.Logger.Error("Rejecting oversized proposal", "peer", e.Src, "height", msg.Proposal.Height)
+				conR.Switch.StopPeerForError(e.Src, ErrProposalTooManyParts)
+				return
+			}
+			if err := msg.Proposal.ValidateBlobSize(maxBlobBytes); err != nil {
 				conR.Logger.Error("Rejecting oversized proposal", "peer", e.Src, "height", msg.Proposal.Height)
 				conR.Switch.StopPeerForError(e.Src, ErrProposalTooManyParts)
 				return

@@ -472,7 +472,7 @@ func (bA *BitArray) UnmarshalJSON(bz []byte) error {
 			bA2.SetIndex(i, true)
 		}
 	}
-	*bA = *bA2 //nolint:govet
+	*bA = *bA2 //nolint:govet,copylocks
 	return nil
 }
 
