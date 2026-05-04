@@ -113,7 +113,9 @@ func (txi *TxIndex) Prune(retainHeight int64) (int64, int64, error) {
 
 	for !done {
 		txi.log.Info("Starting prune txIndex loop", "startKey", string(startKey))
-		itr, err := txi.store.Iterator(startKey, nil) // end=nil → iterate to end of keyspace
+		// Pruning sweeps the height-index range; skip the goleveldb block
+		// cache so this one-shot scan doesn't evict hot tx-search blocks.
+		itr, err := dbm.IteratorWithOpts(txi.store, startKey, nil, &dbm.ReadOptions{DontFillCache: true})
 		if err != nil {
 			return 0, lastRetainHeight, err
 		}
@@ -551,7 +553,9 @@ func (txi *TxIndex) collectEventKeysToDelete(result *abci.TxResult) ([][]byte, e
 			zeroKey := keyForEvent(compositeTag, attr.Value, result, 0)
 			endKey := keyForEvent(compositeTag, attr.Value, result, math.MaxInt64)
 
-			itr, err := txi.store.Iterator(zeroKey, endKey)
+			// Called from the prune path; skip the block cache for these
+			// one-shot lookups so they don't evict hot search blocks.
+			itr, err := dbm.IteratorWithOpts(txi.store, zeroKey, endKey, &dbm.ReadOptions{DontFillCache: true})
 			if err != nil {
 				return nil, err
 			}

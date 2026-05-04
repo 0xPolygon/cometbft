@@ -148,7 +148,10 @@ func (idx *BlockerIndexer) Prune(retainHeight int64) (int64, int64, error) {
 		return nil
 	}
 
-	itr, err := idx.store.Iterator(nil, nil)
+	// Pruning scans the entire block-indexer keyspace once. Skip the
+	// goleveldb block cache for this one-shot scan so it doesn't evict
+	// hot Search/Has working set on the way through.
+	itr, err := dbm.IteratorWithOpts(idx.store, nil, nil, &dbm.ReadOptions{DontFillCache: true})
 	if err != nil {
 		return 0, lastRetainHeight, err
 	}

@@ -256,7 +256,9 @@ func FindSmallestValueWithBrokenKeys(db dbm.DB, prefix []byte) (int, error) {
 	// We assume numeric suffixes can start with digits 0–9
 	for d := byte('0'); d <= byte('9'); d++ {
 		start := append(append([]byte{}, prefix...), d)
-		it, err := db.Iterator(start, nil)
+		// Called on every ABCI-results pruning cycle. Skip the goleveldb
+		// block cache so these scans don't pollute it.
+		it, err := dbm.IteratorWithOpts(db, start, nil, &dbm.ReadOptions{DontFillCache: true})
 		if err != nil {
 			return 0, fmt.Errorf("failed to iterate prefix %q: %w", start, err)
 		}
