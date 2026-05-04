@@ -9,7 +9,6 @@ linters:
     - goconst
     - misspell
     - nakedret
-    - nolintlint
     - prealloc
     - staticcheck
     - unconvert

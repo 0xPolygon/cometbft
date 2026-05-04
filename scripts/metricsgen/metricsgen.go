@@ -269,7 +269,7 @@ func extractHelpMessage(cg *ast.CommentGroup) string {
 	if cg == nil {
 		return ""
 	}
-	var help []string
+	help := make([]string, 0, len(cg.List))
 	for _, c := range cg.List {
 		mt := strings.TrimPrefix(c.Text, "//metrics:")
 		if mt != c.Text {
