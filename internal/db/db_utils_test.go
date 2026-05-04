@@ -4,34 +4,10 @@ import (
 	"bytes"
 	"encoding/binary"
 	"testing"
-	"time"
 
 	dbm "github.com/cometbft/cometbft-db"
 	"github.com/stretchr/testify/require"
 )
-
-func TestReadCompactionWaitFromEnv(t *testing.T) {
-	t.Run("unset uses default", func(t *testing.T) {
-		t.Setenv(compactionWaitEnvVar, "")
-		require.Equal(t, defaultWaitTimeBetweenCompactions, readCompactionWaitFromEnv())
-	})
-	t.Run("valid override", func(t *testing.T) {
-		t.Setenv(compactionWaitEnvVar, "100")
-		require.Equal(t, 100*time.Millisecond, readCompactionWaitFromEnv())
-	})
-	t.Run("zero disables wait", func(t *testing.T) {
-		t.Setenv(compactionWaitEnvVar, "0")
-		require.Equal(t, time.Duration(0), readCompactionWaitFromEnv())
-	})
-	t.Run("negative falls back to default", func(t *testing.T) {
-		t.Setenv(compactionWaitEnvVar, "-5")
-		require.Equal(t, defaultWaitTimeBetweenCompactions, readCompactionWaitFromEnv())
-	})
-	t.Run("garbage falls back to default", func(t *testing.T) {
-		t.Setenv(compactionWaitEnvVar, "abc")
-		require.Equal(t, defaultWaitTimeBetweenCompactions, readCompactionWaitFromEnv())
-	})
-}
 
 // helper: big-endian height key with a fixed domain prefix.
 func keyFn(prefix byte) KeyFunc {

@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
-	"os"
 	"strconv"
 	"time"
 	"unicode/utf8"
@@ -22,36 +21,15 @@ const (
 	// SSTs per shard once the DB grew past steady-state.
 	MaxCompactionInterval = int64(50000)
 
-	// defaultWaitTimeBetweenCompactions throttles successive shard compactions
-	// to (a) yield to the scheduler so consensus goroutines aren't starved
-	// and (b) give the kernel time to drain dirty page-cache pages before
-	// the next shard re-fills it. 2ms (the prior value) wins (a) but is far
+	// WaitTimeBetweenCompactions throttles successive shard compactions to
+	// (a) yield to the scheduler so consensus goroutines aren't starved and
+	// (b) give the kernel time to drain dirty page-cache pages before the
+	// next shard re-fills it. 2ms (the prior value) wins (a) but is far
 	// below Linux's 5s vm.dirty_writeback_centisecs default; 50ms gives
-	// writeback a real window. Operators can tune via COMETBFT_COMPACTION_WAIT_MS.
-	defaultWaitTimeBetweenCompactions = 50 * time.Millisecond
-
-	// compactionWaitEnvVar lets operators tune the throttle without a release.
-	// Value is in milliseconds (integer). Negative or unparseable values fall
-	// back to the default.
-	compactionWaitEnvVar = "COMETBFT_COMPACTION_WAIT_MS"
+	// writeback a real window at negligible cycle-time cost
+	// (~75s extra on the heaviest 1500-shard pruner cycle).
+	WaitTimeBetweenCompactions = 50 * time.Millisecond
 )
-
-// WaitTimeBetweenCompactions is initialized from COMETBFT_COMPACTION_WAIT_MS at
-// package init, falling back to defaultWaitTimeBetweenCompactions. It's a var
-// (not a const) so the env override can apply at startup.
-var WaitTimeBetweenCompactions = readCompactionWaitFromEnv()
-
-func readCompactionWaitFromEnv() time.Duration {
-	raw, ok := os.LookupEnv(compactionWaitEnvVar)
-	if !ok || raw == "" {
-		return defaultWaitTimeBetweenCompactions
-	}
-	ms, err := strconv.Atoi(raw)
-	if err != nil || ms < 0 {
-		return defaultWaitTimeBetweenCompactions
-	}
-	return time.Duration(ms) * time.Millisecond
-}
 
 var (
 	CompactPrefix = []byte("compact_")
