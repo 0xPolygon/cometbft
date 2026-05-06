@@ -342,6 +342,159 @@ func (txi *TxIndex) PruneOld(retainHeight int64) (int64, int64, error) {
 	return numHeightsPersistentlyPruned, currentPersistentlyRetainedHeight, nil
 }
 
+// PruneNumeric prunes the txindex from `lastRetainHeight` (read from the
+// store, defaulting to 1) to `retainHeight`, iterating each height with a
+// tight prefix-bounded iterator instead of the lex-order full-keyspace
+// scan used by Prune.
+//
+// Why this exists: keyForHeight encodes heights as decimal strings, so
+// goleveldb's lex iteration order is NOT numeric order. Prune uses a
+// single Iterator(prefixKeyForHeight(lastRetainHeight), nil) that early-
+// breaks on the first keyHeight ≥ retainHeight. With variable-width
+// decimal heights (e.g. "1000" sorting before "11"), the iterator can
+// hit a high-numbered height while many lower-numbered heights remain
+// unprocessed, leading to chronic under-deletion. PruneNumeric sidesteps
+// this entirely by iterating one height at a time.
+//
+// Additional safety property: lastRetainHeight is checkpointed into the
+// store after every batch flush, so a process killed mid-cycle resumes
+// where it left off rather than restarting from the bottom.
+//
+// Storage format is unchanged. This method can be deployed as a drop-in
+// replacement for Prune.
+func (txi *TxIndex) PruneNumeric(retainHeight int64) (int64, int64, error) {
+	lastRetainHeight, err := txi.getIndexerRetainHeight()
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to look up last tx indexer retain height: %w", err)
+	}
+	if lastRetainHeight == 0 {
+		lastRetainHeight = 1
+	}
+	if retainHeight <= lastRetainHeight {
+		return 0, lastRetainHeight, nil
+	}
+
+	const perBatchFlush = 1000
+
+	flush := func(b dbm.Batch) error {
+		if err := b.WriteSync(); err != nil {
+			return fmt.Errorf("failed to flush tx indexer pruning batch: %w", err)
+		}
+		if cerr := b.Close(); cerr != nil {
+			txi.log.Error("Error closing tx indexer pruning batch", "err", cerr)
+		}
+		return nil
+	}
+
+	batch := txi.store.NewBatch()
+	staged := 0
+	affectedHeights := int64(0)
+	checkpointed := lastRetainHeight
+
+	// Carry one buffer for proto.Unmarshal across heights to dampen
+	// allocation pressure. proto.Unmarshal still allocates substructures,
+	// but the top-level struct is reused.
+	var result abci.TxResult
+
+	for h := lastRetainHeight; h < retainHeight; h++ {
+		// Tight prefix iter: only keys for height h.
+		prefix := prefixKeyForHeight(h)
+		// All keys for height h start with "tx.height/H/" — the byte after
+		// the second '/' is between '0'..'9' for the second-height field
+		// (or end-of-string is impossible since prefixKeyForHeight returns
+		// a prefix not a full key). We bound by appending '/' + 1 ('0'+1=='1')
+		// is wrong — use bytes.HasPrefix as a runtime guard instead and
+		// rely on the iterator's natural advance.
+		needle := append(append([]byte(nil), prefix...), tagKeySeparatorRune)
+
+		itr, err := txi.store.Iterator(prefix, nil)
+		if err != nil {
+			return affectedHeights, checkpointed, err
+		}
+
+		hadKeys := false
+		for ; itr.Valid(); itr.Next() {
+			k := itr.Key()
+			if !bytes.HasPrefix(k, needle) {
+				// We've left height h's prefix; stop scanning this height.
+				break
+			}
+			hadKeys = true
+
+			// Stage height key + the hash key it points to.
+			hk := bytes.Clone(k)
+			hv := bytes.Clone(itr.Value())
+			if err := batch.Delete(hk); err != nil {
+				itr.Close()
+				return affectedHeights, checkpointed, err
+			}
+			if err := batch.Delete(hv); err != nil {
+				itr.Close()
+				return affectedHeights, checkpointed, err
+			}
+			staged += 2
+
+			// Fetch + unmarshal TxResult to collect event-index keys.
+			// DontFillCache: we're going to Delete these blocks shortly.
+			if val, gerr := dbm.GetWithOpts(txi.store, hv, &dbm.ReadOptions{DontFillCache: true}); gerr == nil && len(val) > 0 {
+				result.Reset()
+				if uerr := proto.Unmarshal(val, &result); uerr == nil {
+					if evKeys, eerr := txi.collectEventKeysToDelete(&result); eerr == nil {
+						for _, ek := range evKeys {
+							if err := batch.Delete(ek); err != nil {
+								itr.Close()
+								return affectedHeights, checkpointed, err
+							}
+						}
+						staged += len(evKeys)
+					}
+				}
+			}
+
+			// Flush + checkpoint when staged buffer reaches threshold.
+			if staged >= perBatchFlush {
+				// Persist progress: lastRetainHeight = h (this height not
+				// yet fully processed, but everything < h is committed).
+				if err := txi.setIndexerRetainHeight(h, batch); err != nil {
+					itr.Close()
+					return affectedHeights, checkpointed, err
+				}
+				if err := flush(batch); err != nil {
+					itr.Close()
+					return affectedHeights, checkpointed, err
+				}
+				checkpointed = h
+				batch = txi.store.NewBatch()
+				staged = 0
+			}
+		}
+		itr.Close()
+		if hadKeys {
+			affectedHeights++
+		}
+	}
+
+	// Final flush + checkpoint at retainHeight.
+	if err := txi.setIndexerRetainHeight(retainHeight, batch); err != nil {
+		return affectedHeights, checkpointed, err
+	}
+	if err := flush(batch); err != nil {
+		return affectedHeights, checkpointed, err
+	}
+	checkpointed = retainHeight
+
+	if txi.compact && txi.totalPrunedKeys >= txi.compactionInterval {
+		if err := db.CompactSharded256(txi.store, "txindex prune-numeric"); err != nil {
+			txi.log.Error("compaction failed", "err", err)
+		}
+		txi.totalPrunedKeys = 0
+	}
+	txi.totalPrunedKeys += int64(affectedHeights)
+
+	return affectedHeights, retainHeight, nil
+}
+
+
 func (txi *TxIndex) SetRetainHeight(retainHeight int64) error {
 	return txi.store.SetSync(TxIndexerRetainHeightKey, int64ToBytes(retainHeight))
 }
