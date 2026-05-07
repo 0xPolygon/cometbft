@@ -25,6 +25,16 @@ func swapCompactAndLog(f func(dbm.DB, []byte, []byte, string) error) (restore fu
 	return func() { compactAndLog = prev }
 }
 
+// swapCompactAndMeasure intercepts the byte-measuring compaction primitive
+// used by CompactSharded256 / CompactPrefixHex256 (via compactShardAdaptive).
+// Returning a nonzero dWrite makes the shard count as "compacted"; returning
+// 0 makes it count as "skipped_empty" from the caller's perspective.
+func swapCompactAndMeasure(f func(dbm.DB, []byte, []byte, string) (uint64, error)) (restore func()) {
+	prev := compactAndMeasure
+	compactAndMeasure = f
+	return func() { compactAndMeasure = prev }
+}
+
 func TestCompactIntSharded_DiscoveryStartsAtHugeFirstKey_NoGaps(t *testing.T) {
 	var intervals [][2][]byte
 	restore := swapCompactAndLog(func(db dbm.DB, start, end []byte, lbl string) error {
@@ -165,13 +175,13 @@ func TestCompactIntSharded_ResumeFromStoredMeta_NoGaps(t *testing.T) {
 }
 
 // TestCompactSharded256_SkipsEmptyShards seeds keys only under the lowercase
-// 't' prefix and asserts that CompactSharded256 invokes compactAndLog only
+// 't' prefix and asserts that CompactSharded256 invokes the compactor only
 // for that single shard out of 256.
 func TestCompactSharded256_SkipsEmptyShards(t *testing.T) {
 	var calls [][2][]byte
-	restore := swapCompactAndLog(func(db dbm.DB, start, end []byte, lbl string) error {
+	restore := swapCompactAndMeasure(func(db dbm.DB, start, end []byte, lbl string) (uint64, error) {
 		calls = append(calls, [2][]byte{append([]byte(nil), start...), append([]byte(nil), end...)})
-		return nil
+		return 1, nil // nonzero so the caller counts it as "compacted"
 	})
 	defer restore()
 
@@ -189,9 +199,9 @@ func TestCompactSharded256_SkipsEmptyShards(t *testing.T) {
 // DB no shard is compacted at all.
 func TestCompactSharded256_EmptyDB_NoShardsCompacted(t *testing.T) {
 	var calls int
-	restore := swapCompactAndLog(func(db dbm.DB, start, end []byte, lbl string) error {
+	restore := swapCompactAndMeasure(func(db dbm.DB, start, end []byte, lbl string) (uint64, error) {
 		calls++
-		return nil
+		return 1, nil
 	})
 	defer restore()
 
@@ -204,9 +214,9 @@ func TestCompactSharded256_EmptyDB_NoShardsCompacted(t *testing.T) {
 // — both '1' first byte). One shard should fire.
 func TestCompactPrefixHex256_SkipsEmptyShards(t *testing.T) {
 	var calls int
-	restore := swapCompactAndLog(func(db dbm.DB, start, end []byte, lbl string) error {
+	restore := swapCompactAndMeasure(func(db dbm.DB, start, end []byte, lbl string) (uint64, error) {
 		calls++
-		return nil
+		return 1, nil
 	})
 	defer restore()
 
@@ -217,4 +227,68 @@ func TestCompactPrefixHex256_SkipsEmptyShards(t *testing.T) {
 	require.NoError(t, CompactPrefixHex256(memdb, "BH:", "test"))
 
 	require.Equal(t, 1, calls, "only BH:31-32 shard should fire")
+}
+
+// TestCompactShardAdaptive_NoHistory_SinglePass: with no prior dWrite stored
+// the shard runs as one undivided pass.
+func TestCompactShardAdaptive_NoHistory_SinglePass(t *testing.T) {
+	var calls int
+	restore := swapCompactAndMeasure(func(db dbm.DB, start, end []byte, lbl string) (uint64, error) {
+		calls++
+		return 100, nil
+	})
+	defer restore()
+
+	memdb := dbm.NewMemDB()
+	require.NoError(t, memdb.Set([]byte{0x42, 0x00}, []byte{1}))
+
+	dw, err := compactShardAdaptive(memdb, []byte{0x42}, []byte{0x43}, "test", 0x42)
+	require.NoError(t, err)
+	require.Equal(t, uint64(100), dw)
+	require.Equal(t, 1, calls, "no history -> single pass")
+}
+
+// TestCompactShardAdaptive_HotHistory_SubdividesProportionally: prior write
+// of 1 GiB triggers ceil(1GiB/500MiB)=3 sub-shards; ranges interpolate over
+// the parent shard.
+func TestCompactShardAdaptive_HotHistory_SubdividesProportionally(t *testing.T) {
+	var subs [][2][]byte
+	restore := swapCompactAndMeasure(func(db dbm.DB, start, end []byte, lbl string) (uint64, error) {
+		subs = append(subs, [2][]byte{append([]byte(nil), start...), append([]byte(nil), end...)})
+		return 100, nil
+	})
+	defer restore()
+
+	memdb := dbm.NewMemDB()
+	// Seed keys spanning the entire [0x42, 0x43) range so all sub-shards are populated.
+	for b := 0; b < 256; b += 16 {
+		require.NoError(t, memdb.Set([]byte{0x42, byte(b)}, []byte{1}))
+	}
+	// Prime history: 1 GiB prior write -> ceil(1024MiB / 500MiB) = 3 sub-shards.
+	writeHistoryDWrite(memdb, "test", 0x42, 1024*1024*1024)
+
+	_, err := compactShardAdaptive(memdb, []byte{0x42}, []byte{0x43}, "test", 0x42)
+	require.NoError(t, err)
+	require.Equal(t, 3, len(subs), "1GiB prior should split into 3 sub-shards")
+
+	// Verify ranges are contiguous and cover [0x42, 0x43).
+	require.Equal(t, []byte{0x42}, subs[0][0])
+	require.Equal(t, []byte{0x43}, subs[len(subs)-1][1])
+	for i := 1; i < len(subs); i++ {
+		require.Equal(t, subs[i-1][1], subs[i][0], "sub-shards must be contiguous")
+	}
+}
+
+// TestSplitFactorFromHistory verifies the threshold + cap behaviour.
+func TestSplitFactorFromHistory(t *testing.T) {
+	const MiB = uint64(1024 * 1024)
+	require.Equal(t, 1, splitFactorFromHistory(0))
+	require.Equal(t, 1, splitFactorFromHistory(499*MiB))
+	require.Equal(t, 1, splitFactorFromHistory(500*MiB-1))
+	require.Equal(t, 1, splitFactorFromHistory(500*MiB))     // exactly threshold = single
+	require.Equal(t, 2, splitFactorFromHistory(500*MiB+1))   // just above
+	require.Equal(t, 3, splitFactorFromHistory(1024*MiB))    // 1 GiB -> ceil(1024/500) = 3
+	require.Equal(t, 5, splitFactorFromHistory(2*1024*MiB))  // 2 GiB -> ceil(2048/500) = 5
+	require.Equal(t, 8, splitFactorFromHistory(4*1024*MiB))  // 4 GiB -> 8 (just hits cap)
+	require.Equal(t, 8, splitFactorFromHistory(99*1024*MiB)) // capped
 }

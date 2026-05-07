@@ -24,14 +24,25 @@ const (
 	// SSTs per shard once the DB grew past steady-state.
 	MaxCompactionInterval = int64(50000)
 
-	// WaitTimeBetweenCompactions throttles successive shard compactions to
-	// (a) yield to the scheduler so consensus goroutines aren't starved and
-	// (b) give the kernel time to drain dirty page-cache pages before the
-	// next shard re-fills it. 200ms gives writeback well over Linux's 5s
-	// vm.dirty_writeback_centisecs default a real window between bursts.
-	// Combined with skip-empty-shard, sweeps now spend most time on the
-	// ~30 populated shards (out of 256) so total wall-time cost is small.
-	WaitTimeBetweenCompactions = 200 * time.Millisecond
+	// WaitTimeBetweenCompactions throttles successive shard compactions.
+	// Linux's vm.dirty_writeback_centisecs defaults to 5s; pauses shorter
+	// than that don't cross a writeback boundary so the kernel can't reliably
+	// drain dirty pages between bursts. 2s gets us past the writeback flush
+	// without idling forever and is the dominant lever for keeping page
+	// cache from accumulating across shards.
+	WaitTimeBetweenCompactions = 2 * time.Second
+
+	// SubshardSplitThresholdBytes is the per-shard write-byte threshold above
+	// which the next prune cycle subdivides that shard. We cap subshard count
+	// at SubshardMaxSplit so a 4 GB shard becomes 8 sub-shards of ~500 MB,
+	// not 80 sub-shards. Below this threshold a shard runs un-split.
+	SubshardSplitThresholdBytes = uint64(500 * 1024 * 1024) // 500 MiB
+	SubshardMaxSplit            = 8
+
+	// CompactHistoryPrefix scopes adaptive-sharding metadata (per-shard prior
+	// dWrite). Stored alongside CompactPrefix in the same DB so resume +
+	// adaptive-split state share a key namespace.
+	compactHistoryPrefix = "compact_history_"
 )
 
 var (
@@ -181,18 +192,15 @@ func CompactPrefixHex256(db dbm.DB, prefix string, label string) error {
 			shardLabel = fmt.Sprintf("%s %s ff-fg", label, prefix)
 		}
 
-		hasAny, err := shardHasKeys(db, start, end)
+		dw, err := compactShardAdaptive(db, start, end, label, b)
 		if err != nil {
-			return fmt.Errorf("compaction %s probe failed: %w", shardLabel, err)
+			return fmt.Errorf("compaction %s: %w", shardLabel, err)
 		}
-		if !hasAny {
+		if dw == 0 {
 			skipped++
 			continue
 		}
 		compacted++
-		if err := compactAndLog(db, start, end, shardLabel); err != nil {
-			return err
-		}
 	}
 
 	log.Printf("compaction %s prefix %q DONE in %s (compacted=%d skipped_empty=%d)",
@@ -227,18 +235,15 @@ func CompactSharded256(db dbm.DB, label string) error {
 			shardLabel = fmt.Sprintf("%s shard %02x-%02x", label, b, b+1)
 		}
 
-		hasAny, err := shardHasKeys(db, start, end)
+		dw, err := compactShardAdaptive(db, start, end, label, b)
 		if err != nil {
-			return fmt.Errorf("compaction %s probe failed: %w", shardLabel, err)
+			return fmt.Errorf("compaction %s: %w", shardLabel, err)
 		}
-		if !hasAny {
+		if dw == 0 {
 			skipped++
 			continue
 		}
 		compacted++
-		if err := compactAndLog(db, start, end, shardLabel); err != nil {
-			return err
-		}
 	}
 
 	log.Printf("compaction %s DONE in %s (compacted=%d skipped_empty=%d)",
@@ -259,12 +264,146 @@ func shardHasKeys(db dbm.DB, start, end []byte) (bool, error) {
 	return it.Valid(), nil
 }
 
+// historyKey returns the metadata key under which we persist the prior-cycle
+// dWrite for a (label, shardIdx) pair. The shard index is the byte b in
+// CompactSharded256 / CompactPrefixHex256.
+func historyKey(label string, shardIdx int) []byte {
+	return []byte(fmt.Sprintf("%s%s_%03d", compactHistoryPrefix, label, shardIdx))
+}
+
+func readHistoryDWrite(db dbm.DB, label string, shardIdx int) uint64 {
+	bz, err := db.Get(historyKey(label, shardIdx))
+	if err != nil || len(bz) != 8 {
+		return 0
+	}
+	return binary.BigEndian.Uint64(bz)
+}
+
+func writeHistoryDWrite(db dbm.DB, label string, shardIdx int, dWrite uint64) {
+	var b [8]byte
+	binary.BigEndian.PutUint64(b[:], dWrite)
+	_ = db.Set(historyKey(label, shardIdx), b[:])
+}
+
+// splitFactorFromHistory maps prior-cycle dWrite to a sub-shard count.
+// Below threshold: 1 (no split). Above: ceil(prior / threshold), capped.
+func splitFactorFromHistory(priorDWrite uint64) int {
+	if priorDWrite < SubshardSplitThresholdBytes {
+		return 1
+	}
+	n := int((priorDWrite + SubshardSplitThresholdBytes - 1) / SubshardSplitThresholdBytes)
+	if n > SubshardMaxSplit {
+		n = SubshardMaxSplit
+	}
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
+// byteRangeSplit divides [start, end) into n sub-ranges by interpolating an
+// extra byte after `start`. The returned ranges are contiguous and cover
+// exactly [start, end). For the open-ended case end==nil it splits the
+// keyspace [start, ∞) using ascending second-byte interpolation; the final
+// sub-range stays open-ended.
+//
+// Examples (n=4):
+//
+//	[0x00, 0x01) -> [0x00, 0x0040), [0x0040, 0x0080), [0x0080, 0x00c0), [0x00c0, 0x01)
+//	[0x42, 0x43) -> [0x42, 0x4240), ..., [0x42c0, 0x43)
+func byteRangeSplit(start, end []byte, n int) [][2][]byte {
+	if n <= 1 {
+		return [][2][]byte{{start, end}}
+	}
+	out := make([][2][]byte, 0, n)
+	for i := 0; i < n; i++ {
+		var sStart, sEnd []byte
+		if i == 0 {
+			sStart = start
+		} else {
+			sStart = appendInterpolant(start, i, n)
+		}
+		if i == n-1 {
+			sEnd = end
+		} else {
+			sEnd = appendInterpolant(start, i+1, n)
+		}
+		out = append(out, [2][]byte{sStart, sEnd})
+	}
+	return out
+}
+
+// appendInterpolant returns start || byte(i*256/n). Used to interpolate
+// sub-shard boundaries inside a single-byte shard range.
+func appendInterpolant(start []byte, i, n int) []byte {
+	b := byte((i * 256) / n)
+	out := make([]byte, len(start)+1)
+	copy(out, start)
+	out[len(start)] = b
+	return out
+}
+
+// compactShardAdaptive runs a single shard, optionally subdividing based on
+// the prior-cycle write history persisted in the DB. Returns the cumulative
+// dWrite observed for this shard (which becomes the next cycle's history).
+//
+// The skip-empty probe runs at the *sub*-shard level too: a shard whose
+// data clusters in part of its range will only re-compact the populated
+// sub-ranges next cycle.
+func compactShardAdaptive(db dbm.DB, start, end []byte, label string, shardIdx int) (uint64, error) {
+	prior := readHistoryDWrite(db, label, shardIdx)
+	splitN := splitFactorFromHistory(prior)
+	subs := byteRangeSplit(start, end, splitN)
+
+	var totalDW uint64
+	for i, sub := range subs {
+		var subLabel string
+		if splitN == 1 {
+			subLabel = fmt.Sprintf("%s shard %02x", label, shardIdx)
+		} else {
+			subLabel = fmt.Sprintf("%s shard %02x sub %d/%d", label, shardIdx, i+1, splitN)
+		}
+		hasAny, err := shardHasKeys(db, sub[0], sub[1])
+		if err != nil {
+			return totalDW, fmt.Errorf("%s probe failed: %w", subLabel, err)
+		}
+		if !hasAny {
+			continue
+		}
+		dw, err := compactAndMeasure(db, sub[0], sub[1], subLabel)
+		if err != nil {
+			return totalDW, err
+		}
+		totalDW += dw
+	}
+	if totalDW > 0 {
+		// Only persist when we actually wrote something. Writing zeros for
+		// every empty shard would pollute the keyspace with metadata keys
+		// inside the same byte-shard ranges we're sweeping (history keys
+		// start with 'c' = 0x63, which would otherwise fall into shard 0x63
+		// on the next sweep and force a spurious compaction).
+		writeHistoryDWrite(db, label, shardIdx, totalDW)
+	}
+	return totalDW, nil
+}
+
 // CompactAndLog compacts [start, limit) and logs the range, duration, and
 // the process-level read/write byte deltas observed during the call. The
 // byte deltas come from /proc/self/io and capture *all* I/O issued by the
 // process during the compact (including background goroutines), so they're
 // upper bounds — but they pin per-shard amplification cost in production.
 func CompactAndLog(db dbm.DB, start, limit []byte, label string) error {
+	_, err := compactAndMeasure(db, start, limit, label)
+	return err
+}
+
+// compactAndMeasure is the shared implementation for both the dWrite-returning
+// adaptive path and the legacy CompactAndLog signature. Returns the observed
+// /proc/self/io write_bytes delta so callers can persist it for adaptive
+// sub-sharding decisions on the next cycle.
+var compactAndMeasure = realCompactAndMeasure
+
+func realCompactAndMeasure(db dbm.DB, start, limit []byte, label string) (uint64, error) {
 	time.Sleep(WaitTimeBetweenCompactions)
 
 	rng := fmt.Sprintf("[%s, %s)", prettyKey(start), prettyKey(limit))
@@ -277,11 +416,12 @@ func CompactAndLog(db dbm.DB, start, limit []byte, label string) error {
 
 	if err != nil {
 		log.Printf("compaction %s range %s FAILED after %s: %v", label, rng, elapsed, err)
-		return err
+		return 0, err
 	}
+	dWrite := wb1 - wb0
 	log.Printf("compaction %s range %s done in %s dRead=%dB dWrite=%dB",
-		label, rng, elapsed, rb1-rb0, wb1-wb0)
-	return nil
+		label, rng, elapsed, rb1-rb0, dWrite)
+	return dWrite, nil
 }
 
 // procIOBytes reads /proc/self/io and returns (read_bytes, write_bytes).
