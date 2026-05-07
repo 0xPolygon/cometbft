@@ -163,3 +163,58 @@ func TestCompactIntSharded_ResumeFromStoredMeta_NoGaps(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, end2-1, last2)
 }
+
+// TestCompactSharded256_SkipsEmptyShards seeds keys only under the lowercase
+// 't' prefix and asserts that CompactSharded256 invokes compactAndLog only
+// for that single shard out of 256.
+func TestCompactSharded256_SkipsEmptyShards(t *testing.T) {
+	var calls [][2][]byte
+	restore := swapCompactAndLog(func(db dbm.DB, start, end []byte, lbl string) error {
+		calls = append(calls, [2][]byte{append([]byte(nil), start...), append([]byte(nil), end...)})
+		return nil
+	})
+	defer restore()
+
+	memdb := dbm.NewMemDB()
+	require.NoError(t, memdb.Set([]byte("tx.height/100"), []byte{1}))
+	require.NoError(t, memdb.Set([]byte("tx.hash/abcd"), []byte{1}))
+
+	require.NoError(t, CompactSharded256(memdb, "test"))
+
+	require.Len(t, calls, 1, "only the 't' shard (0x74) should be compacted")
+	require.Equal(t, byte('t'), calls[0][0][0], "compacted shard must start at 0x74 ('t')")
+}
+
+// TestCompactSharded256_EmptyDB_NoShardsCompacted asserts that on an empty
+// DB no shard is compacted at all.
+func TestCompactSharded256_EmptyDB_NoShardsCompacted(t *testing.T) {
+	var calls int
+	restore := swapCompactAndLog(func(db dbm.DB, start, end []byte, lbl string) error {
+		calls++
+		return nil
+	})
+	defer restore()
+
+	require.NoError(t, CompactSharded256(dbm.NewMemDB(), "empty"))
+	require.Zero(t, calls, "empty DB must yield zero compactions")
+}
+
+// TestCompactPrefixHex256_SkipsEmptyShards seeds two keys under "BH:" prefix
+// (heights 1 and 1000) so they fall in distinct hex shards (BH:31 and BH:31
+// — both '1' first byte). One shard should fire.
+func TestCompactPrefixHex256_SkipsEmptyShards(t *testing.T) {
+	var calls int
+	restore := swapCompactAndLog(func(db dbm.DB, start, end []byte, lbl string) error {
+		calls++
+		return nil
+	})
+	defer restore()
+
+	memdb := dbm.NewMemDB()
+	require.NoError(t, memdb.Set([]byte("BH:31"), []byte{1}))
+	require.NoError(t, memdb.Set([]byte("BH:31000"), []byte{1}))
+
+	require.NoError(t, CompactPrefixHex256(memdb, "BH:", "test"))
+
+	require.Equal(t, 1, calls, "only BH:31-32 shard should fire")
+}

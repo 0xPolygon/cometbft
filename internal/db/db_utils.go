@@ -1,12 +1,15 @@
 package db
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"log"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -24,11 +27,11 @@ const (
 	// WaitTimeBetweenCompactions throttles successive shard compactions to
 	// (a) yield to the scheduler so consensus goroutines aren't starved and
 	// (b) give the kernel time to drain dirty page-cache pages before the
-	// next shard re-fills it. 2ms (the prior value) wins (a) but is far
-	// below Linux's 5s vm.dirty_writeback_centisecs default; 50ms gives
-	// writeback a real window at negligible cycle-time cost
-	// (~75s extra on the heaviest 1500-shard pruner cycle).
-	WaitTimeBetweenCompactions = 50 * time.Millisecond
+	// next shard re-fills it. 200ms gives writeback well over Linux's 5s
+	// vm.dirty_writeback_centisecs default a real window between bursts.
+	// Combined with skip-empty-shard, sweeps now spend most time on the
+	// ~30 populated shards (out of 256) so total wall-time cost is small.
+	WaitTimeBetweenCompactions = 200 * time.Millisecond
 )
 
 var (
@@ -146,6 +149,10 @@ func CompactIntSharded(
 //
 // The final shard ends at "BH:fg" so that every key starting with "BH:ff"
 // compares < "BH:fg" (since 'g' is the next ASCII char after 'f').
+//
+// Shards that contain no keys are detected by a one-row Iterator probe and
+// skipped — on real workloads this prunes ~220 of 256 shards because key
+// schemas concentrate in the lowercase-ASCII zone.
 func CompactPrefixHex256(db dbm.DB, prefix string, label string) error {
 	startAll := time.Now()
 
@@ -153,6 +160,7 @@ func CompactPrefixHex256(db dbm.DB, prefix string, label string) error {
 		return fmt.Errorf("prefix must be non-empty")
 	}
 
+	var compacted, skipped int
 	for b := 0; b <= 0xFF; b++ {
 		start := []byte(fmt.Sprintf("%s%02x", prefix, b))
 
@@ -173,20 +181,36 @@ func CompactPrefixHex256(db dbm.DB, prefix string, label string) error {
 			shardLabel = fmt.Sprintf("%s %s ff-fg", label, prefix)
 		}
 
+		hasAny, err := shardHasKeys(db, start, end)
+		if err != nil {
+			return fmt.Errorf("compaction %s probe failed: %w", shardLabel, err)
+		}
+		if !hasAny {
+			skipped++
+			continue
+		}
+		compacted++
 		if err := compactAndLog(db, start, end, shardLabel); err != nil {
 			return err
 		}
 	}
 
-	log.Printf("compaction %s prefix %q ALL 256 SHARDS DONE in %s", label, prefix, time.Since(startAll))
+	log.Printf("compaction %s prefix %q DONE in %s (compacted=%d skipped_empty=%d)",
+		label, prefix, time.Since(startAll), compacted, skipped)
 	return nil
 }
 
 // CompactSharded256 compacts the DB into 256 ranges:
 // [0x00,0x01), [0x01,0x02), …, [0xFE,0xFF), [0xFF,∞)
+//
+// Shards that contain no keys are detected by a one-row Iterator probe and
+// skipped. CometBFT key schemas (e.g. "tx.hash", "block.height", event-type
+// prefixes) concentrate keys in the lowercase-ASCII zone, leaving ~220 of
+// the 256 shards empty on real workloads.
 func CompactSharded256(db dbm.DB, label string) error {
 	startAll := time.Now()
 
+	var compacted, skipped int
 	for b := 0; b < 256; b++ {
 		start := []byte{byte(b)}
 		var end []byte
@@ -203,30 +227,90 @@ func CompactSharded256(db dbm.DB, label string) error {
 			shardLabel = fmt.Sprintf("%s shard %02x-%02x", label, b, b+1)
 		}
 
+		hasAny, err := shardHasKeys(db, start, end)
+		if err != nil {
+			return fmt.Errorf("compaction %s probe failed: %w", shardLabel, err)
+		}
+		if !hasAny {
+			skipped++
+			continue
+		}
+		compacted++
 		if err := compactAndLog(db, start, end, shardLabel); err != nil {
 			return err
 		}
 	}
 
-	log.Printf("compaction %s ALL SHARDS DONE in %s", label, time.Since(startAll))
+	log.Printf("compaction %s DONE in %s (compacted=%d skipped_empty=%d)",
+		label, time.Since(startAll), compacted, skipped)
 	return nil
 }
 
-// CompactAndLog compacts [start, limit) and logs the range and duration.
+// shardHasKeys reports whether any key exists in [start, end). Cost is one
+// SeekGE — microseconds — versus a full CompactRange which on a populated DB
+// rewrites overlapping SSTs. Uses DontFillCache so the probe doesn't pollute
+// goleveldb's block cache.
+func shardHasKeys(db dbm.DB, start, end []byte) (bool, error) {
+	it, err := dbm.IteratorWithOpts(db, start, end, &dbm.ReadOptions{DontFillCache: true})
+	if err != nil {
+		return false, err
+	}
+	defer it.Close()
+	return it.Valid(), nil
+}
+
+// CompactAndLog compacts [start, limit) and logs the range, duration, and
+// the process-level read/write byte deltas observed during the call. The
+// byte deltas come from /proc/self/io and capture *all* I/O issued by the
+// process during the compact (including background goroutines), so they're
+// upper bounds — but they pin per-shard amplification cost in production.
 func CompactAndLog(db dbm.DB, start, limit []byte, label string) error {
 	time.Sleep(WaitTimeBetweenCompactions)
 
 	rng := fmt.Sprintf("[%s, %s)", prettyKey(start), prettyKey(limit))
 
+	rb0, wb0 := procIOBytes()
 	t0 := time.Now()
 	err := db.Compact(start, limit)
 	elapsed := time.Since(t0)
+	rb1, wb1 := procIOBytes()
 
 	if err != nil {
 		log.Printf("compaction %s range %s FAILED after %s: %v", label, rng, elapsed, err)
 		return err
 	}
+	log.Printf("compaction %s range %s done in %s dRead=%dB dWrite=%dB",
+		label, rng, elapsed, rb1-rb0, wb1-wb0)
 	return nil
+}
+
+// procIOBytes reads /proc/self/io and returns (read_bytes, write_bytes).
+// On non-linux or read failure, returns (0, 0); the resulting delta of 0
+// is logged unobtrusively rather than failing the compaction.
+func procIOBytes() (uint64, uint64) {
+	f, err := os.Open("/proc/self/io")
+	if err != nil {
+		return 0, 0
+	}
+	defer f.Close()
+	var rb, wb uint64
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := sc.Text()
+		switch {
+		case strings.HasPrefix(line, "read_bytes:"):
+			v, err := strconv.ParseUint(strings.TrimSpace(strings.TrimPrefix(line, "read_bytes:")), 10, 64)
+			if err == nil {
+				rb = v
+			}
+		case strings.HasPrefix(line, "write_bytes:"):
+			v, err := strconv.ParseUint(strings.TrimSpace(strings.TrimPrefix(line, "write_bytes:")), 10, 64)
+			if err == nil {
+				wb = v
+			}
+		}
+	}
+	return rb, wb
 }
 
 // prettyKey renders a key as quoted ASCII if possible, otherwise as hex.
