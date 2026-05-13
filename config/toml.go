@@ -459,6 +459,9 @@ chunk_request_timeout = "{{ .StateSync.ChunkRequestTimeout }}"
 # The number of concurrent chunk fetchers to run (default: 1).
 chunk_fetchers = "{{ .StateSync.ChunkFetchers }}"
 
+# Maximum number of chunks allowed in a snapshot (default: 100000).
+max_snapshot_chunks = {{ .StateSync.MaxSnapshotChunks }}
+
 #######################################################
 ###       Block Sync Configuration Options          ###
 #######################################################
@@ -512,6 +515,9 @@ create_empty_blocks_interval = "{{ .Consensus.CreateEmptyBlocksInterval }}"
 # Reactor sleep duration parameters
 peer_gossip_sleep_duration = "{{ .Consensus.PeerGossipSleepDuration }}"
 peer_query_maj23_sleep_duration = "{{ .Consensus.PeerQueryMaj23SleepDuration }}"
+
+# Maximum allowed difference between proposed block time and wall-clock time.
+block_time_tolerance = "{{ .Consensus.BlockTimeTolerance }}"
 
 #######################################################
 ###         Storage Configuration Options           ###
