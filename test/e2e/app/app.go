@@ -616,11 +616,9 @@ func (app *Application) ProcessProposal(_ context.Context, req *abci.RequestProc
 			// We make a note of it in the cache so we can inform FinalizeBlock. A real application will have better methods for this.
 			app.blobCache[req.Height] = noBlobBytes()
 		}
-	} else {
-		if len(req.Blob) != 0 {
-			app.logger.Error("received a blob when blobs are disabled, rejecting proposal", "received height", req.Height, "received", req.Blob)
-			return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
-		}
+	} else if len(req.Blob) != 0 {
+		app.logger.Error("received a blob when blobs are disabled, rejecting proposal", "received height", req.Height, "received", req.Blob)
+		return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
 	}
 	_, areExtensionsEnabled := app.checkHeightAndExtensions(true, req.Height, "ProcessProposal")
 

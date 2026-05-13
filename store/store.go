@@ -475,7 +475,7 @@ func (bs *BlockStore) PruneBlocks(height int64, state sm.State) (uint64, int64, 
 
 	if bs.compact && bs.blocksToCompact >= bs.compactionInterval {
 		_ = db.CompactIntSharded(bs.db, initialHeight, endHeight, db.MaxCompactionInterval, calcBlockMetaKey, "pruneBlockscalcBlockMetaKey")
-		_ = db.CompactPrefixHex256(bs.db, "BH:", "pruneBlocksblockHashKeyRange") //BlockHashKeyRange
+		_ = db.CompactPrefixHex256(bs.db, "BH:", "pruneBlocksblockHashKeyRange") // BlockHashKeyRange
 		_ = db.CompactIntSharded(bs.db, initialHeight, endHeight, db.MaxCompactionInterval, calcBlockCommitKey, "pruneBlockscalcBlockCommitKey")
 		_ = db.CompactIntSharded(bs.db, initialHeight, endHeight, db.MaxCompactionInterval, calcExtCommitKey, "pruneBlockscalcExtCommitKey")
 		_ = db.CompactIntSharded(bs.db, initialHeight, endHeight, db.MaxCompactionInterval, calcSeenCommitKey, "pruneBlockscalcSeenCommitKey")
