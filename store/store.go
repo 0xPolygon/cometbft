@@ -475,7 +475,12 @@ func (bs *BlockStore) PruneBlocks(height int64, state sm.State) (uint64, int64, 
 
 	if bs.compact && bs.blocksToCompact >= bs.compactionInterval {
 		_ = db.CompactIntSharded(bs.db, initialHeight, endHeight, db.MaxCompactionInterval, calcBlockMetaKey, "pruneBlockscalcBlockMetaKey")
-		_ = db.CompactPrefixHex256(bs.db, "BH:", "pruneBlocksblockHashKeyRange") //BlockHashKeyRange
+		// BH:<hash> reverse-index forced compaction removed. Keys are
+		// hash-uniform so CompactPrefixHex256 rewrites SSTs across all 256
+		// hex shards (≈50 GB writes/cycle, 14m wall) for ~0.17% of blockstore
+		// data. BH tombstones from the per-height delete loop are reclaimed
+		// by goleveldb background compaction at its own pace; BlockByHash
+		// reads pay microseconds per skipped tombstone.
 		_ = db.CompactIntSharded(bs.db, initialHeight, endHeight, db.MaxCompactionInterval, calcBlockCommitKey, "pruneBlockscalcBlockCommitKey")
 		_ = db.CompactIntSharded(bs.db, initialHeight, endHeight, db.MaxCompactionInterval, calcExtCommitKey, "pruneBlockscalcExtCommitKey")
 		_ = db.CompactIntSharded(bs.db, initialHeight, endHeight, db.MaxCompactionInterval, calcSeenCommitKey, "pruneBlockscalcSeenCommitKey")
