@@ -82,27 +82,6 @@ func makeStateAndBlockStoreAndIndexers(testName string) (sm.State, *BlockStore, 
 	return state, NewBlockStore(blockDB), txIndexer, blockIndexer, func() { os.RemoveAll(config.RootDir) }, stateStore
 }
 
-// Helper to create and save a batch of blocks (optionally updating stateStore)
-func saveBlocks(bs *BlockStore, state sm.State, stateStore sm.Store, from, to int64, updateStateStore bool) {
-	for h := from; h <= to; h++ {
-		block, err := state.MakeBlock(h, test.MakeNTxs(h, 10), new(types.Commit), nil, state.Validators.GetProposer().Address)
-		if err != nil {
-			panic(err)
-		}
-		partSet, err := block.MakePartSet(types.PartSizeBytes)
-		if err != nil {
-			panic(err)
-		}
-		seenCommit := makeTestExtCommit(h, cmttime.Now())
-		bs.SaveBlockWithExtendedCommit(block, partSet, seenCommit)
-		if updateStateStore && stateStore != nil {
-			err = stateStore.Save(state)
-			if err != nil {
-				panic("error reading state from stor")
-			}
-		}
-	}
-}
 func TestLoadBlockStoreState(t *testing.T) {
 	type blockStoreTest struct {
 		testName string
@@ -151,7 +130,6 @@ func TestNewBlockStore(t *testing.T) {
 	}
 
 	for i, tt := range panicCausers {
-		tt := tt
 		// Expecting a panic here on trying to parse an invalid blockStore
 		_, _, panicErr := doFn(func() (interface{}, error) {
 			err := db.Set(blockStoreKey, tt.data)
@@ -318,7 +296,6 @@ func TestBlockStoreSaveLoadBlock(t *testing.T) {
 	}
 
 	for i, tuple := range tuples {
-		tuple := tuple
 		bs, db := newInMemoryBlockStore()
 		// SaveBlock
 		res, err, panicErr := doFn(func() (interface{}, error) {
@@ -506,7 +483,14 @@ func TestLoadBaseMeta(t *testing.T) {
 	require.NoError(t, err)
 	bs := NewBlockStore(dbm.NewMemDB())
 
-	saveBlocks(bs, state, stateStore, 1, 10, true)
+	for h := int64(1); h <= 10; h++ {
+		block, err := state.MakeBlock(h, test.MakeNTxs(h, 10), new(types.Commit), nil, state.Validators.GetProposer().Address)
+		require.NoError(t, err)
+		partSet, err := block.MakePartSet(types.PartSizeBytes)
+		require.NoError(t, err)
+		seenCommit := makeTestExtCommit(h, cmttime.Now())
+		bs.SaveBlockWithExtendedCommit(block, partSet, seenCommit)
+	}
 
 	_, _, err = bs.PruneBlocks(4, state)
 	require.NoError(t, err)
@@ -632,7 +616,15 @@ func TestPruningService(t *testing.T) {
 	require.NoError(t, err)
 
 	// make more than 1000 blocks, to test batch deletions
-	saveBlocks(bs, state, stateStore, 1, 1500, true)
+	for h := int64(1); h <= 1500; h++ {
+		block, err := state.MakeBlock(h, test.MakeNTxs(h, 10), new(types.Commit), nil, state.Validators.GetProposer().Address)
+		require.NoError(t, err)
+		partSet, err := block.MakePartSet(types.PartSizeBytes)
+		require.NoError(t, err)
+		seenCommit := makeTestExtCommit(h, cmttime.Now())
+		bs.SaveBlockWithExtendedCommit(block, partSet, seenCommit)
+		require.NoError(t, stateStore.Save(state))
+	}
 
 	assert.EqualValues(t, 1, bs.Base())
 	assert.EqualValues(t, 1500, bs.Height())
@@ -772,7 +764,15 @@ func TestPruneBlocks(t *testing.T) {
 	_, _, err = bs.PruneBlocks(0, state)
 	require.Error(t, err)
 
-	saveBlocks(bs, state, stateStore, 1, 1500, true)
+	// make more than 1000 blocks, to test batch deletions
+	for h := int64(1); h <= 1500; h++ {
+		block, err := state.MakeBlock(h, test.MakeNTxs(h, 10), new(types.Commit), nil, state.Validators.GetProposer().Address)
+		require.NoError(t, err)
+		partSet, err := block.MakePartSet(types.PartSizeBytes)
+		require.NoError(t, err)
+		seenCommit := makeTestExtCommit(h, cmttime.Now())
+		bs.SaveBlockWithExtendedCommit(block, partSet, seenCommit)
+	}
 
 	assert.EqualValues(t, 1, bs.Base())
 	assert.EqualValues(t, 1500, bs.Height())

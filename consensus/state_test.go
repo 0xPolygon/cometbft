@@ -1165,7 +1165,7 @@ func TestStateLockPOLSafety1(t *testing.T) {
 		blockID1,
 		blobID1,
 	)
-	//signProposal
+	// signProposal
 	p := prop1.ToProto()
 	err = vs2.SignProposal(chainID, p)
 	require.NoError(t, err)

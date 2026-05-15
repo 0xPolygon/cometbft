@@ -275,7 +275,7 @@ func (app *Application) InitChain(_ context.Context, req *abci.RequestInitChain)
 	// Get validators from genesis
 	if req.Validators != nil {
 		for _, val := range req.Validators {
-			val := val
+
 			if err := app.storeValidator(&val); err != nil {
 				return nil, err
 			}
@@ -616,11 +616,9 @@ func (app *Application) ProcessProposal(_ context.Context, req *abci.RequestProc
 			// We make a note of it in the cache so we can inform FinalizeBlock. A real application will have better methods for this.
 			app.blobCache[req.Height] = noBlobBytes()
 		}
-	} else {
-		if len(req.Blob) != 0 {
-			app.logger.Error("received a blob when blobs are disabled, rejecting proposal", "received height", req.Height, "received", req.Blob)
-			return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
-		}
+	} else if len(req.Blob) != 0 {
+		app.logger.Error("received a blob when blobs are disabled, rejecting proposal", "received height", req.Height, "received", req.Blob)
+		return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
 	}
 	_, areExtensionsEnabled := app.checkHeightAndExtensions(true, req.Height, "ProcessProposal")
 
@@ -897,7 +895,7 @@ func (app *Application) verifyAndSum(
 			return 0, fmt.Errorf("error when marshaling signed bytes: %w", err)
 		}
 
-		//... and verify
+		// ... and verify
 		valAddr := crypto.Address(vote.Validator.Address).String()
 		pubKeyHex := app.state.Get(prefixReservedKey + valAddr)
 		if len(pubKeyHex) == 0 {

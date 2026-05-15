@@ -584,7 +584,7 @@ func (txi *TxIndex) deleteEvents(result *abci.TxResult, batch dbm.Batch) error {
 
 func (txi *TxIndex) indexEvents(result *abci.TxResult, hash []byte, store dbm.Batch) error {
 	for _, event := range result.Result.Events {
-		txi.eventSeq = txi.eventSeq + 1
+		txi.eventSeq++
 		// only index events with a non-empty type
 		if len(event.Type) == 0 {
 			continue

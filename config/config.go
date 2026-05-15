@@ -172,7 +172,7 @@ func (cfg *Config) CheckDeprecated() []string {
 // BaseConfig
 
 // BaseConfig defines the base configuration for a CometBFT node
-type BaseConfig struct { //nolint: maligned
+type BaseConfig struct {
 
 	// The version of the CometBFT binary that created
 	// or last modified the config file
@@ -547,7 +547,7 @@ func (cfg RPCConfig) IsTLSEnabled() bool {
 // P2PConfig
 
 // P2PConfig defines the configuration options for the CometBFT peer-to-peer networking layer
-type P2PConfig struct { //nolint: maligned
+type P2PConfig struct {
 	RootDir string `mapstructure:"home"`
 
 	// Address to listen for incoming connections
@@ -873,6 +873,7 @@ type StateSyncConfig struct {
 	DiscoveryTime       time.Duration `mapstructure:"discovery_time"`
 	ChunkRequestTimeout time.Duration `mapstructure:"chunk_request_timeout"`
 	ChunkFetchers       int32         `mapstructure:"chunk_fetchers"`
+	MaxSnapshotChunks   uint32        `mapstructure:"max_snapshot_chunks"`
 }
 
 func (cfg *StateSyncConfig) TrustHashBytes() []byte {
@@ -891,6 +892,7 @@ func DefaultStateSyncConfig() *StateSyncConfig {
 		DiscoveryTime:       15 * time.Second,
 		ChunkRequestTimeout: 10 * time.Second,
 		ChunkFetchers:       4,
+		MaxSnapshotChunks:   100000,
 	}
 }
 
@@ -943,6 +945,10 @@ func (cfg *StateSyncConfig) ValidateBasic() error {
 
 		if cfg.ChunkFetchers <= 0 {
 			return errors.New("chunk_fetchers is required")
+		}
+
+		if cfg.MaxSnapshotChunks == 0 {
+			return errors.New("max_snapshot_chunks is required")
 		}
 	}
 
@@ -1021,6 +1027,9 @@ type ConsensusConfig struct {
 	PeerQueryMaj23SleepDuration time.Duration `mapstructure:"peer_query_maj23_sleep_duration"`
 
 	DoubleSignCheckHeight int64 `mapstructure:"double_sign_check_height"`
+
+	// BlockTimeTolerance is the maximum allowed difference between the proposed block time and wall-clock time.
+	BlockTimeTolerance time.Duration `mapstructure:"block_time_tolerance"`
 }
 
 // DefaultConsensusConfig returns a default configuration for the consensus service
@@ -1040,6 +1049,7 @@ func DefaultConsensusConfig() *ConsensusConfig {
 		PeerGossipSleepDuration:     100 * time.Millisecond,
 		PeerQueryMaj23SleepDuration: 2000 * time.Millisecond,
 		DoubleSignCheckHeight:       int64(0),
+		BlockTimeTolerance:          60 * time.Second,
 	}
 }
 
@@ -1141,6 +1151,9 @@ func (cfg *ConsensusConfig) ValidateBasic() error {
 	}
 	if cfg.DoubleSignCheckHeight < 0 {
 		return errors.New("double_sign_check_height can't be negative")
+	}
+	if cfg.BlockTimeTolerance <= 0 {
+		return errors.New("block_time_tolerance must be positive")
 	}
 	return nil
 }
