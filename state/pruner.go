@@ -44,7 +44,8 @@ type Pruner struct {
 	metrics      *Metrics
 
 	// Preserve the number of state entries pruned.
-	// Used to calculated correctly when to trigger compactions
+	// Used to calculated correctly when to trigger compactions.
+	//
 	// Deprecated: This field is unused and will be removed in a future release.
 	prunedStates          uint64 //nolint:unused,SA4006 // Deprecated
 	indexerPruningEnabled bool

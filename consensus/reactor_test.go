@@ -817,7 +817,7 @@ func timeoutWaitGroup(n int, f func(int)) {
 // Ensure basic validation of structs is functioning
 
 func TestNewRoundStepMessageValidateBasic(t *testing.T) {
-	testCases := []struct { //nolint: maligned
+	testCases := []struct {
 		expectErr              bool
 		messageRound           int32
 		messageLastCommitRound int32
@@ -835,7 +835,7 @@ func TestNewRoundStepMessageValidateBasic(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
+
 		t.Run(tc.testName, func(t *testing.T) {
 			message := NewRoundStepMessage{
 				Height:          tc.messageHeight,
@@ -856,7 +856,7 @@ func TestNewRoundStepMessageValidateBasic(t *testing.T) {
 
 func TestNewRoundStepMessageValidateHeight(t *testing.T) {
 	initialHeight := int64(10)
-	testCases := []struct { //nolint: maligned
+	testCases := []struct {
 		expectErr              bool
 		messageLastCommitRound int32
 		messageHeight          int64
@@ -870,7 +870,7 @@ func TestNewRoundStepMessageValidateHeight(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
+
 		t.Run(tc.testName, func(t *testing.T) {
 			message := NewRoundStepMessage{
 				Height:          tc.messageHeight,
@@ -923,7 +923,7 @@ func TestNewValidBlockMessageValidateBasic(t *testing.T) {
 	}
 
 	for i, tc := range testCases {
-		tc := tc
+
 		t.Run(fmt.Sprintf("#%d", i), func(t *testing.T) {
 			msg := &NewValidBlockMessage{
 				Height: 1,
@@ -967,7 +967,7 @@ func TestProposalPOLMessageValidateBasic(t *testing.T) {
 	}
 
 	for i, tc := range testCases {
-		tc := tc
+
 		t.Run(fmt.Sprintf("#%d", i), func(t *testing.T) {
 			msg := &ProposalPOLMessage{
 				Height:           1,
@@ -1000,7 +1000,7 @@ func TestBlockPartMessageValidateBasic(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
+
 		t.Run(tc.testName, func(t *testing.T) {
 			message := BlockPartMessage{
 				Height: tc.messageHeight,
@@ -1059,7 +1059,7 @@ func TestHasVoteMessageValidateBasic(t *testing.T) {
 		invalidSignedMsgType cmtproto.SignedMsgType = 0x03
 	)
 
-	testCases := []struct { //nolint: maligned
+	testCases := []struct {
 		expectErr     bool
 		messageRound  int32
 		messageIndex  int32
@@ -1075,7 +1075,7 @@ func TestHasVoteMessageValidateBasic(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
+
 		t.Run(tc.testName, func(t *testing.T) {
 			message := HasVoteMessage{
 				Height: tc.messageHeight,
@@ -1104,7 +1104,7 @@ func TestVoteSetMaj23MessageValidateBasic(t *testing.T) {
 		},
 	}
 
-	testCases := []struct { //nolint: maligned
+	testCases := []struct {
 		expectErr      bool
 		messageRound   int32
 		messageHeight  int64
@@ -1120,7 +1120,7 @@ func TestVoteSetMaj23MessageValidateBasic(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
+
 		t.Run(tc.testName, func(t *testing.T) {
 			message := VoteSetMaj23Message{
 				Height:  tc.messageHeight,
@@ -1166,7 +1166,7 @@ func TestVoteSetBitsMessageValidateBasic(t *testing.T) {
 	}
 
 	for i, tc := range testCases {
-		tc := tc
+
 		t.Run(fmt.Sprintf("#%d", i), func(t *testing.T) {
 			msg := &VoteSetBitsMessage{
 				Height:  1,

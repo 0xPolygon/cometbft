@@ -229,7 +229,7 @@ func TestTxSearch(t *testing.T) {
 	ctx := context.Background()
 
 	for _, tc := range testCases {
-		tc := tc
+
 		t.Run(tc.q, func(t *testing.T) {
 			results, err := indexer.Search(ctx, query.MustCompile(tc.q))
 			assert.NoError(t, err)
@@ -322,7 +322,7 @@ func TestTxSearchEventMatch(t *testing.T) {
 	ctx := context.Background()
 
 	for _, tc := range testCases {
-		tc := tc
+
 		t.Run(tc.q, func(t *testing.T) {
 			results, err := indexer.Search(ctx, query.MustCompile(tc.q))
 			assert.NoError(t, err)
@@ -398,7 +398,7 @@ func TestTxSearchEventMatchByHeight(t *testing.T) {
 	ctx := context.Background()
 
 	for _, tc := range testCases {
-		tc := tc
+
 		t.Run(tc.q, func(t *testing.T) {
 			results, err := indexer.Search(ctx, query.MustCompile(tc.q))
 			assert.NoError(t, err)
@@ -504,7 +504,7 @@ func TestTxSearchDeprecatedIndexing(t *testing.T) {
 	ctx := context.Background()
 
 	for _, tc := range testCases {
-		tc := tc
+
 		t.Run(tc.q, func(t *testing.T) {
 			results, err := indexer.Search(ctx, query.MustCompile(tc.q))
 			require.NoError(t, err)
@@ -873,7 +873,7 @@ func TestBigInt(t *testing.T) {
 	ctx := context.Background()
 
 	for _, tc := range testCases {
-		tc := tc
+
 		t.Run(tc.q, func(t *testing.T) {
 			results, err := indexer.Search(ctx, query.MustCompile(tc.q))
 			assert.NoError(t, err)
