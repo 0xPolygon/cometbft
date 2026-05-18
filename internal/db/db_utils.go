@@ -256,7 +256,13 @@ func FindSmallestValueWithBrokenKeys(db dbm.DB, prefix []byte) (int, error) {
 	// We assume numeric suffixes can start with digits 0–9
 	for d := byte('0'); d <= byte('9'); d++ {
 		start := append(append([]byte{}, prefix...), d)
-		it, err := db.Iterator(start, nil)
+		// Bound the iterator to [prefix+d, prefix+d+1). Without this end key
+		// goleveldb reads SST blocks far past the prefix range and retains
+		// them in util.BufferPool — observed at ~11 GB per prune cycle and
+		// confirmed root cause of the heimdall pruning memory spike.
+		// For d=='9', d+1==':' (ASCII 58), a valid lexicographic upper bound.
+		end := append(append([]byte{}, prefix...), d+1)
+		it, err := db.Iterator(start, end)
 		if err != nil {
 			return 0, fmt.Errorf("failed to iterate prefix %q: %w", start, err)
 		}
