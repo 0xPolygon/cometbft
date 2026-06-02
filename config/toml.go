@@ -519,6 +519,19 @@ peer_query_maj23_sleep_duration = "{{ .Consensus.PeerQueryMaj23SleepDuration }}"
 # Maximum allowed difference between proposed block time and wall-clock time.
 block_time_tolerance = "{{ .Consensus.BlockTimeTolerance }}"
 
+# After initial block-sync completes, report catching_up=true when a peer is more
+# than this many blocks ahead of us (i.e. this node has stopped keeping up). Set to
+# 0 to disable; must be >=2 when enabled to absorb normal round skew.
+catchup_lag_threshold = {{ .Consensus.CatchupLagThreshold }}
+
+# When >0, report catching_up=true while connected peers are below this count, since
+# the node cannot establish that it is current. Keep at 0 for single-node deployments.
+min_expected_peers = {{ .Consensus.MinExpectedPeers }}
+
+# How long the peer-lag condition must hold before catching_up flips to true
+# (flap damping). The transition back to false is immediate.
+catchup_debounce_duration = "{{ .Consensus.CatchupDebounceDuration }}"
+
 #######################################################
 ###         Storage Configuration Options           ###
 #######################################################

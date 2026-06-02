@@ -46,6 +46,15 @@ type Reactor struct {
 	eventBus *types.EventBus
 	rs       *cstypes.RoundState
 
+	// catchUpLagThreshold, minExpectedPeers and catchUpDebounce drive IsBehind,
+	// which lets /status report catching_up=true after initial sync when this node
+	// has fallen behind live peers. behindSince tracks how long the lag condition
+	// has held continuously, for debouncing.
+	catchUpLagThreshold int64
+	minExpectedPeers    int
+	catchUpDebounce     time.Duration
+	behindSince         time.Time
+
 	Metrics *Metrics
 }
 
@@ -420,6 +429,70 @@ func (conR *Reactor) WaitSync() bool {
 	conR.mtx.RLock()
 	defer conR.mtx.RUnlock()
 	return conR.waitSync
+}
+
+// IsBehind reports whether this node has stopped keeping up with its peers after
+// the initial block-sync has completed. WaitSync only reflects startup block-sync
+// and stays false for the rest of the process, so on its own catching_up never
+// reflects a node that later falls behind. IsBehind closes that gap from
+// peer-reported heights.
+//
+// It compares heights rather than block-time staleness on purpose: a stale local
+// block time can't distinguish a node that is behind its peers (some peer reports a
+// greater height) from a network where every node has legitimately stopped at the
+// same height (no peer is ahead). Only the former is "catching up"; reporting the
+// latter as catching up would be a false positive.
+func (conR *Reactor) IsBehind() bool {
+	raw := conR.isBehindRaw()
+
+	conR.mtx.Lock()
+	defer conR.mtx.Unlock()
+	return conR.applyDebounceLocked(raw, time.Now())
+}
+
+// isBehindRaw gathers the local and max peer heights and applies the lag decision,
+// without debouncing. It holds no lock while reading peers / round state.
+func (conR *Reactor) isBehindRaw() bool {
+	peers := conR.Switch.Peers().List()
+
+	var maxPeerHeight int64
+	for _, peer := range peers {
+		ps, ok := peer.Get(types.PeerStateKey).(*PeerState)
+		if !ok {
+			continue
+		}
+		if h := ps.GetHeight(); h > maxPeerHeight {
+			maxPeerHeight = h
+		}
+	}
+
+	return conR.evaluateBehind(conR.getRoundState().Height, maxPeerHeight, len(peers))
+}
+
+// evaluateBehind is the pure lag decision. Too few peers means we can't prove we're
+// current (off by default so single-node stays healthy). A zero threshold disables
+// the height check. maxPeerHeight == 0 means no peer height learned yet.
+func (conR *Reactor) evaluateBehind(myHeight, maxPeerHeight int64, nPeers int) bool {
+	if conR.minExpectedPeers > 0 && nPeers < conR.minExpectedPeers {
+		return true
+	}
+	if conR.catchUpLagThreshold <= 0 || maxPeerHeight == 0 {
+		return false
+	}
+	return maxPeerHeight-myHeight > conR.catchUpLagThreshold
+}
+
+// applyDebounceLocked requires the lag condition to hold for catchUpDebounce before
+// returning true; recovery to false is immediate. conR.mtx must be held.
+func (conR *Reactor) applyDebounceLocked(raw bool, now time.Time) bool {
+	if !raw {
+		conR.behindSince = time.Time{}
+		return false
+	}
+	if conR.behindSince.IsZero() {
+		conR.behindSince = now
+	}
+	return now.Sub(conR.behindSince) >= conR.catchUpDebounce
 }
 
 //--------------------------------------
@@ -1055,6 +1128,15 @@ func (conR *Reactor) StringIndented(indent string) string {
 // ReactorMetrics sets the metrics
 func ReactorMetrics(metrics *Metrics) ReactorOption {
 	return func(conR *Reactor) { conR.Metrics = metrics }
+}
+
+// ReactorCatchupConfig configures the IsBehind heuristic that backs catching_up.
+func ReactorCatchupConfig(lagThreshold int64, minPeers int, debounce time.Duration) ReactorOption {
+	return func(conR *Reactor) {
+		conR.catchUpLagThreshold = lagThreshold
+		conR.minExpectedPeers = minPeers
+		conR.catchUpDebounce = debounce
+	}
 }
 
 //-----------------------------------------------------------------------------

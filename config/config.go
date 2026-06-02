@@ -1030,6 +1030,25 @@ type ConsensusConfig struct {
 
 	// BlockTimeTolerance is the maximum allowed difference between the proposed block time and wall-clock time.
 	BlockTimeTolerance time.Duration `mapstructure:"block_time_tolerance"`
+
+	// CatchupLagThreshold is how many blocks a peer may be ahead of us before we
+	// report catching_up=true. The reactor's WaitSync latch only reflects the
+	// initial block-sync at startup and stays false for the rest of the process, so
+	// without this check a node that later stops keeping up with its peers still
+	// reports catching_up=false. The comparison is against peer-reported heights
+	// rather than block-time staleness, so a network where every node has
+	// legitimately stopped at the same height is not misreported as catching up.
+	// 0 disables the check; must be >=2 when enabled to absorb the normal one-height
+	// round skew between synced peers.
+	CatchupLagThreshold int64 `mapstructure:"catchup_lag_threshold"`
+	// MinExpectedPeers, when >0, reports catching_up=true while connected peers are
+	// below this count, since a node that cannot reach enough peers cannot establish
+	// that it is current. 0 keeps single-node deployments healthy.
+	MinExpectedPeers int `mapstructure:"min_expected_peers"`
+	// CatchupDebounceDuration is how long the peer-lag condition must hold
+	// continuously before catching_up flips to true, damping flapping at the
+	// threshold boundary. The transition back to false is immediate.
+	CatchupDebounceDuration time.Duration `mapstructure:"catchup_debounce_duration"`
 }
 
 // DefaultConsensusConfig returns a default configuration for the consensus service
@@ -1050,6 +1069,9 @@ func DefaultConsensusConfig() *ConsensusConfig {
 		PeerQueryMaj23SleepDuration: 2000 * time.Millisecond,
 		DoubleSignCheckHeight:       int64(0),
 		BlockTimeTolerance:          60 * time.Second,
+		CatchupLagThreshold:         5,
+		MinExpectedPeers:            0,
+		CatchupDebounceDuration:     10 * time.Second,
 	}
 }
 
@@ -1154,6 +1176,18 @@ func (cfg *ConsensusConfig) ValidateBasic() error {
 	}
 	if cfg.BlockTimeTolerance <= 0 {
 		return errors.New("block_time_tolerance must be positive")
+	}
+	if cfg.CatchupLagThreshold < 0 {
+		return errors.New("catchup_lag_threshold can't be negative")
+	}
+	if cfg.CatchupLagThreshold == 1 {
+		return errors.New("catchup_lag_threshold must be 0 (disabled) or >=2 to absorb round skew")
+	}
+	if cfg.MinExpectedPeers < 0 {
+		return errors.New("min_expected_peers can't be negative")
+	}
+	if cfg.CatchupDebounceDuration < 0 {
+		return errors.New("catchup_debounce_duration can't be negative")
 	}
 	return nil
 }
