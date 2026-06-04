@@ -46,12 +46,11 @@ type Reactor struct {
 	eventBus *types.EventBus
 	rs       *cstypes.RoundState
 
-	// catchUpLagThreshold, minExpectedPeers and catchUpDebounce drive IsBehind,
-	// which lets /status report catching_up=true after initial sync when this node
-	// has fallen behind live peers. behindSince tracks how long the lag condition
-	// has held continuously, for debouncing.
+	// catchUpLagThreshold and catchUpDebounce drive IsBehind, which lets /status
+	// report catching_up=true after initial sync when this node has fallen behind
+	// live peers. behindSince tracks how long the lag condition has held
+	// continuously, for debouncing.
 	catchUpLagThreshold int64
-	minExpectedPeers    int
 	catchUpDebounce     time.Duration
 	behindSince         time.Time
 
@@ -466,15 +465,22 @@ func (conR *Reactor) isBehindRaw() bool {
 		}
 	}
 
-	return conR.evaluateBehind(conR.getRoundState().Height, maxPeerHeight, len(peers))
+	// Sole-validator status is read live from consensus state on every call, so it
+	// reflects validator-set changes this node has committed into local round state
+	// without any cached value to update. (A node partitioned before a set change
+	// can't observe the other side's update, but that only makes it report behind,
+	// which is correct.)
+	return conR.evaluateBehind(conR.getRoundState().Height, maxPeerHeight, len(peers), conR.conS.isLocalSoleValidator())
 }
 
-// evaluateBehind is the pure lag decision. Too few peers means we can't prove we're
-// current (off by default so single-node stays healthy). A zero threshold disables
-// the height check. maxPeerHeight == 0 means no peer height learned yet.
-func (conR *Reactor) evaluateBehind(myHeight, maxPeerHeight int64, nPeers int) bool {
-	if conR.minExpectedPeers > 0 && nPeers < conR.minExpectedPeers {
-		return true
+// evaluateBehind is the pure lag decision. With no peers we can't observe progress,
+// so we report behind unless this node can finalize on its own (it's the sole
+// validator); a non-validator or a validator in a larger set genuinely needs peers.
+// A zero threshold disables the height-lag check (the zero-peer rule still applies).
+// maxPeerHeight == 0 means no peer height learned yet.
+func (conR *Reactor) evaluateBehind(myHeight, maxPeerHeight int64, nPeers int, isSoleValidator bool) bool {
+	if nPeers == 0 {
+		return !isSoleValidator
 	}
 	if conR.catchUpLagThreshold <= 0 || maxPeerHeight == 0 {
 		return false
@@ -1131,10 +1137,9 @@ func ReactorMetrics(metrics *Metrics) ReactorOption {
 }
 
 // ReactorCatchupConfig configures the IsBehind heuristic that backs catching_up.
-func ReactorCatchupConfig(lagThreshold int64, minPeers int, debounce time.Duration) ReactorOption {
+func ReactorCatchupConfig(lagThreshold int64, debounce time.Duration) ReactorOption {
 	return func(conR *Reactor) {
 		conR.catchUpLagThreshold = lagThreshold
-		conR.minExpectedPeers = minPeers
 		conR.catchUpDebounce = debounce
 	}
 }

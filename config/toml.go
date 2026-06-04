@@ -521,12 +521,10 @@ block_time_tolerance = "{{ .Consensus.BlockTimeTolerance }}"
 
 # After initial block-sync completes, report catching_up=true when a peer is more
 # than this many blocks ahead of us (i.e. this node has stopped keeping up). Set to
-# 0 to disable; must be >=2 when enabled to absorb normal round skew.
+# 0 to disable peer-height lag detection only; must be >=2 when enabled to absorb
+# normal round skew. A node with no peers in a multi-validator network still reports
+# catching_up regardless of this setting.
 catchup_lag_threshold = {{ .Consensus.CatchupLagThreshold }}
-
-# When >0, report catching_up=true while connected peers are below this count, since
-# the node cannot establish that it is current. Keep at 0 for single-node deployments.
-min_expected_peers = {{ .Consensus.MinExpectedPeers }}
 
 # How long the peer-lag condition must hold before catching_up flips to true
 # (flap damping). The transition back to false is immediate.

@@ -1038,13 +1038,11 @@ type ConsensusConfig struct {
 	// reports catching_up=false. The comparison is against peer-reported heights
 	// rather than block-time staleness, so a network where every node has
 	// legitimately stopped at the same height is not misreported as catching up.
-	// 0 disables the check; must be >=2 when enabled to absorb the normal one-height
-	// round skew between synced peers.
+	// 0 disables peer-height lag detection only; must be >=2 when enabled to absorb
+	// the normal one-height round skew between synced peers. The separate zero-peer
+	// rule (a node with no peers in a multi-validator network reports catching_up)
+	// always applies, independent of this threshold.
 	CatchupLagThreshold int64 `mapstructure:"catchup_lag_threshold"`
-	// MinExpectedPeers, when >0, reports catching_up=true while connected peers are
-	// below this count, since a node that cannot reach enough peers cannot establish
-	// that it is current. 0 keeps single-node deployments healthy.
-	MinExpectedPeers int `mapstructure:"min_expected_peers"`
 	// CatchupDebounceDuration is how long the peer-lag condition must hold
 	// continuously before catching_up flips to true, damping flapping at the
 	// threshold boundary. The transition back to false is immediate.
@@ -1070,7 +1068,6 @@ func DefaultConsensusConfig() *ConsensusConfig {
 		DoubleSignCheckHeight:       int64(0),
 		BlockTimeTolerance:          60 * time.Second,
 		CatchupLagThreshold:         5,
-		MinExpectedPeers:            0,
 		CatchupDebounceDuration:     10 * time.Second,
 	}
 }
@@ -1182,9 +1179,6 @@ func (cfg *ConsensusConfig) ValidateBasic() error {
 	}
 	if cfg.CatchupLagThreshold == 1 {
 		return errors.New("catchup_lag_threshold must be 0 (disabled) or >=2 to absorb round skew")
-	}
-	if cfg.MinExpectedPeers < 0 {
-		return errors.New("min_expected_peers can't be negative")
 	}
 	if cfg.CatchupDebounceDuration < 0 {
 		return errors.New("catchup_debounce_duration can't be negative")

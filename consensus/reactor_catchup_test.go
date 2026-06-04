@@ -9,35 +9,31 @@ import (
 
 func TestEvaluateBehind(t *testing.T) {
 	tests := []struct {
-		name          string
-		lagThreshold  int64
-		minPeers      int
-		myHeight      int64
-		maxPeerHeight int64
-		nPeers        int
-		want          bool
+		name            string
+		lagThreshold    int64
+		myHeight        int64
+		maxPeerHeight   int64
+		nPeers          int
+		isSoleValidator bool
+		want            bool
 	}{
-		{"peer far ahead", 5, 0, 100, 110, 3, true},
-		{"peer ahead within threshold", 5, 0, 100, 105, 3, false},
-		{"peer exactly at threshold", 5, 0, 100, 105, 3, false},
-		{"peer one over threshold", 5, 0, 100, 106, 3, true},
-		{"equal height network halt", 5, 0, 100, 100, 3, false},
-		{"round skew peer one ahead", 5, 0, 100, 101, 3, false},
-		{"no peer height learned", 5, 0, 100, 0, 3, false},
-		{"threshold disabled ignores lag", 0, 0, 100, 999, 3, false},
-		{"single node zero peers healthy", 5, 0, 100, 0, 0, false},
-		{"min peers guard off with zero peers", 5, 0, 100, 100, 0, false},
-		{"min peers guard trips below min", 5, 2, 100, 100, 1, true},
-		{"min peers guard satisfied", 5, 2, 100, 100, 2, false},
-		{"min peers guard fires even when lag disabled", 0, 2, 100, 0, 0, true},
+		{"peer far ahead", 5, 100, 110, 3, false, true},
+		{"peer ahead within threshold", 5, 100, 105, 3, false, false},
+		{"peer one over threshold", 5, 100, 106, 3, false, true},
+		{"equal height network halt", 5, 100, 100, 3, false, false},
+		{"round skew peer one ahead", 5, 100, 101, 3, false, false},
+		{"no peer height learned", 5, 100, 0, 3, false, false},
+		{"threshold disabled ignores lag", 0, 100, 999, 3, false, false},
+		{"sole validator zero peers healthy", 5, 100, 0, 0, true, false},
+		{"non-sole zero peers behind", 5, 100, 0, 0, false, true},
+		{"zero peers behind even when lag disabled", 0, 100, 0, 0, false, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			conR := &Reactor{
 				catchUpLagThreshold: tt.lagThreshold,
-				minExpectedPeers:    tt.minPeers,
 			}
-			got := conR.evaluateBehind(tt.myHeight, tt.maxPeerHeight, tt.nPeers)
+			got := conR.evaluateBehind(tt.myHeight, tt.maxPeerHeight, tt.nPeers, tt.isSoleValidator)
 			assert.Equal(t, tt.want, got)
 		})
 	}

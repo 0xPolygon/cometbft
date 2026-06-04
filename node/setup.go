@@ -334,7 +334,6 @@ func createConsensusReactor(config *cfg.Config,
 	consensusReactor := cs.NewReactor(consensusState, waitSync, cs.ReactorMetrics(csMetrics),
 		cs.ReactorCatchupConfig(
 			config.Consensus.CatchupLagThreshold,
-			config.Consensus.MinExpectedPeers,
 			config.Consensus.CatchupDebounceDuration,
 		))
 	consensusReactor.SetLogger(consensusLogger)
