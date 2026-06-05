@@ -1181,7 +1181,7 @@ func (cfg *ConsensusConfig) ValidateBasic() error {
 		return errors.New("catchup_lag_threshold can't be negative")
 	}
 	if cfg.CatchupLagThreshold == 1 {
-		return errors.New("catchup_lag_threshold must be 0 (disabled) or >=2 to absorb round skew")
+		return errors.New("catchup_lag_threshold must be 0 (disabled) or >=2 (margin beyond the one-height round skew)")
 	}
 	if cfg.CatchupDebounceDuration < 0 {
 		return errors.New("catchup_debounce_duration can't be negative")
