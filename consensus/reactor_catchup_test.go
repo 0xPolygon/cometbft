@@ -5,6 +5,11 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/cometbft/cometbft/crypto"
+	"github.com/cometbft/cometbft/p2p"
+	p2pmock "github.com/cometbft/cometbft/p2p/mock"
+	"github.com/cometbft/cometbft/types"
 )
 
 func TestEvaluateBehind(t *testing.T) {
@@ -42,6 +47,71 @@ func TestEvaluateBehind(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+// peerWithHeight returns a mock peer carrying a consensus PeerState at height h.
+func peerWithHeight(h int64) *p2pmock.Peer {
+	p := p2pmock.NewPeer(nil)
+	ps := NewPeerState(p)
+	ps.PRS.Height = h
+	p.Set(types.PeerStateKey, ps)
+	return p
+}
+
+func TestCollectPeerHeights(t *testing.T) {
+	t.Run("no peers yields empty slice", func(t *testing.T) {
+		assert.Empty(t, collectPeerHeights(nil))
+	})
+
+	t.Run("collects every peer height in order", func(t *testing.T) {
+		peers := []p2p.Peer{peerWithHeight(100), peerWithHeight(110), peerWithHeight(90)}
+		assert.Equal(t, []int64{100, 110, 90}, collectPeerHeights(peers))
+	})
+
+	t.Run("skips peer without a PeerState", func(t *testing.T) {
+		peers := []p2p.Peer{peerWithHeight(100), p2pmock.NewPeer(nil), peerWithHeight(110)}
+		assert.Equal(t, []int64{100, 110}, collectPeerHeights(peers))
+	})
+
+	t.Run("skips peer with a non-PeerState value at the key", func(t *testing.T) {
+		bad := p2pmock.NewPeer(nil)
+		bad.Set(types.PeerStateKey, "not a peer state")
+		peers := []p2p.Peer{peerWithHeight(100), bad}
+		assert.Equal(t, []int64{100}, collectPeerHeights(peers))
+	})
+}
+
+func TestIsLocalSoleValidator(t *testing.T) {
+	val, _ := types.RandValidator(false, 10)
+	other, _ := types.RandValidator(false, 10)
+
+	tests := []struct {
+		name   string
+		pubKey crypto.PubKey
+		valSet *types.ValidatorSet
+		want   bool
+	}{
+		{"sole validator and we are it", val.PubKey, types.NewValidatorSet([]*types.Validator{val}), true},
+		{"sole validator but it is not us", other.PubKey, types.NewValidatorSet([]*types.Validator{val}), false},
+		{"we are in a larger set", val.PubKey, types.NewValidatorSet([]*types.Validator{val, other}), false},
+		{"no local validator key", nil, types.NewValidatorSet([]*types.Validator{val}), false},
+		{"no validator set", val.PubKey, nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cs := &State{}
+			cs.privValidatorPubKey = tt.pubKey
+			cs.Validators = tt.valSet
+			assert.Equal(t, tt.want, cs.isLocalSoleValidator())
+		})
+	}
+}
+
+func TestReactorCatchupConfig(t *testing.T) {
+	conR := &Reactor{}
+	ReactorCatchupConfig(7, 3*time.Second)(conR)
+	assert.Equal(t, int64(7), conR.catchUpLagThreshold)
+	assert.Equal(t, 3*time.Second, conR.catchUpDebounce)
 }
 
 func TestApplyDebounce(t *testing.T) {

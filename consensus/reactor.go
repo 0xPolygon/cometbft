@@ -449,19 +449,10 @@ func (conR *Reactor) IsBehind() bool {
 	return conR.applyDebounceLocked(raw, time.Now())
 }
 
-// isBehindRaw gathers the local and max peer heights and applies the lag decision,
-// without debouncing. It holds no lock while reading peers / round state.
+// isBehindRaw gathers the local height and peer heights and applies the lag
+// decision, without debouncing. It holds no lock while reading peers / round state.
 func (conR *Reactor) isBehindRaw() bool {
-	peers := conR.Switch.Peers().List()
-
-	peerHeights := make([]int64, 0, len(peers))
-	for _, peer := range peers {
-		ps, ok := peer.Get(types.PeerStateKey).(*PeerState)
-		if !ok {
-			continue
-		}
-		peerHeights = append(peerHeights, ps.GetHeight())
-	}
+	peerHeights := collectPeerHeights(conR.Switch.Peers().List())
 
 	// Sole-validator status is read live from consensus state on every call, so it
 	// reflects validator-set changes this node has committed into local round state
@@ -469,6 +460,22 @@ func (conR *Reactor) isBehindRaw() bool {
 	// can't observe the other side's update, but that only makes it report behind,
 	// which is correct.)
 	return conR.evaluateBehind(conR.getRoundState().Height, peerHeights, conR.conS.isLocalSoleValidator())
+}
+
+// collectPeerHeights returns the gossiped consensus height of every peer that
+// carries a consensus PeerState. Peers without one (key absent or wrong type)
+// are skipped rather than counted as height 0, so they don't dilute the
+// majority calculation in evaluateBehind.
+func collectPeerHeights(peers []p2p.Peer) []int64 {
+	heights := make([]int64, 0, len(peers))
+	for _, peer := range peers {
+		ps, ok := peer.Get(types.PeerStateKey).(*PeerState)
+		if !ok {
+			continue
+		}
+		heights = append(heights, ps.GetHeight())
+	}
+	return heights
 }
 
 // minCorroboratingPeers is the fewest connected peers required before peer-height
