@@ -179,6 +179,12 @@ func TestConsensusConfig_ValidateBasic(t *testing.T) {
 		"BlockTimeTolerance":                   {func(c *config.ConsensusConfig) { c.BlockTimeTolerance = time.Second }, false},
 		"BlockTimeTolerance zero":              {func(c *config.ConsensusConfig) { c.BlockTimeTolerance = 0 }, true},
 		"BlockTimeTolerance negative":          {func(c *config.ConsensusConfig) { c.BlockTimeTolerance = -1 }, true},
+		"CatchupLagThreshold disabled":         {func(c *config.ConsensusConfig) { c.CatchupLagThreshold = 0 }, false},
+		"CatchupLagThreshold one":              {func(c *config.ConsensusConfig) { c.CatchupLagThreshold = 1 }, true},
+		"CatchupLagThreshold two":              {func(c *config.ConsensusConfig) { c.CatchupLagThreshold = 2 }, false},
+		"CatchupLagThreshold negative":         {func(c *config.ConsensusConfig) { c.CatchupLagThreshold = -1 }, true},
+		"CatchupDebounceDuration zero":         {func(c *config.ConsensusConfig) { c.CatchupDebounceDuration = 0 }, false},
+		"CatchupDebounceDuration negative":     {func(c *config.ConsensusConfig) { c.CatchupDebounceDuration = -1 }, true},
 	}
 	for desc, tc := range testcases {
 		t.Run(desc, func(t *testing.T) {
@@ -193,6 +199,12 @@ func TestConsensusConfig_ValidateBasic(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDefaultConsensusConfigCatchupDefaults(t *testing.T) {
+	cfg := config.DefaultConsensusConfig()
+	assert.Equal(t, int64(5), cfg.CatchupLagThreshold)
+	assert.Equal(t, 10*time.Second, cfg.CatchupDebounceDuration)
 }
 
 func TestInstrumentationConfigValidateBasic(t *testing.T) {

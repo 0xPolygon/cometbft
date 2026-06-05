@@ -2727,6 +2727,20 @@ func (cs *State) updatePrivValidatorPubKey() error {
 	return nil
 }
 
+// isLocalSoleValidator reports whether this node is the only validator in the
+// current set, i.e. it can finalize blocks on its own and so does not need peers
+// to make progress. Uses the same local-validator membership test as the signing
+// path (Validators.HasAddress on the private validator's address), so a
+// non-validator full node always returns false.
+func (cs *State) isLocalSoleValidator() bool {
+	cs.mtx.RLock()
+	defer cs.mtx.RUnlock()
+	if cs.privValidatorPubKey == nil || cs.Validators == nil {
+		return false
+	}
+	return cs.Validators.Size() == 1 && cs.Validators.HasAddress(cs.privValidatorPubKey.Address())
+}
+
 // look back to check existence of the node's consensus votes before joining consensus
 func (cs *State) checkDoubleSigningRisk(height int64) error {
 	if cs.privValidator != nil && cs.privValidatorPubKey != nil && cs.config.DoubleSignCheckHeight > 0 && height > 0 {
