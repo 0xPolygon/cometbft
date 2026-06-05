@@ -5,7 +5,10 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	cfg "github.com/cometbft/cometbft/config"
+	cstypes "github.com/cometbft/cometbft/consensus/types"
 	"github.com/cometbft/cometbft/crypto"
 	"github.com/cometbft/cometbft/p2p"
 	p2pmock "github.com/cometbft/cometbft/p2p/mock"
@@ -112,6 +115,56 @@ func TestReactorCatchupConfig(t *testing.T) {
 	ReactorCatchupConfig(7, 3*time.Second)(conR)
 	assert.Equal(t, int64(7), conR.catchUpLagThreshold)
 	assert.Equal(t, 3*time.Second, conR.catchUpDebounce)
+}
+
+// newCatchupReactor wires a Reactor with a non-started Switch carrying mock peers
+// at the given heights, a round state at myHeight, and (optionally) a single-validator
+// set that this node belongs to. catchUpDebounce is 0 so IsBehind reflects the raw
+// decision immediately, keeping the test free of timing.
+func newCatchupReactor(t *testing.T, myHeight int64, sole bool, peerHeights ...int64) *Reactor {
+	t.Helper()
+	cs := &State{}
+	if sole {
+		val, _ := types.RandValidator(false, 10)
+		cs.Validators = types.NewValidatorSet([]*types.Validator{val})
+		cs.privValidatorPubKey = val.PubKey
+	}
+	conR := &Reactor{
+		conS:                cs,
+		rs:                  &cstypes.RoundState{Height: myHeight},
+		catchUpLagThreshold: 5,
+		catchUpDebounce:     0,
+	}
+	conR.BaseReactor = *p2p.NewBaseReactor("Consensus", conR)
+
+	sw := p2p.NewSwitch(cfg.DefaultP2PConfig(), nil)
+	peerSet := sw.Peers().(*p2p.PeerSet)
+	for _, h := range peerHeights {
+		require.NoError(t, peerSet.Add(peerWithHeight(h)))
+	}
+	conR.SetSwitch(sw)
+	return conR
+}
+
+// TestIsBehindIntegration exercises the full IsBehind path (Switch peers ->
+// collectPeerHeights -> evaluateBehind, plus the sole-validator and debounce
+// wiring) rather than the pure decision helpers in isolation.
+func TestIsBehindIntegration(t *testing.T) {
+	t.Run("majority of peers ahead reports behind", func(t *testing.T) {
+		assert.True(t, newCatchupReactor(t, 100, false, 110, 110, 110).IsBehind())
+	})
+	t.Run("synced multi-peer network is not behind", func(t *testing.T) {
+		assert.False(t, newCatchupReactor(t, 100, false, 100, 100, 100).IsBehind())
+	})
+	t.Run("lone peer ahead cannot corroborate", func(t *testing.T) {
+		assert.False(t, newCatchupReactor(t, 100, false, 110).IsBehind())
+	})
+	t.Run("no peers and not sole validator is behind", func(t *testing.T) {
+		assert.True(t, newCatchupReactor(t, 100, false).IsBehind())
+	})
+	t.Run("no peers but sole validator is not behind", func(t *testing.T) {
+		assert.False(t, newCatchupReactor(t, 100, true).IsBehind())
+	})
 }
 
 func TestApplyDebounce(t *testing.T) {
