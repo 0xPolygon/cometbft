@@ -454,15 +454,13 @@ func (conR *Reactor) IsBehind() bool {
 func (conR *Reactor) isBehindRaw() bool {
 	peers := conR.Switch.Peers().List()
 
-	var maxPeerHeight int64
+	peerHeights := make([]int64, 0, len(peers))
 	for _, peer := range peers {
 		ps, ok := peer.Get(types.PeerStateKey).(*PeerState)
 		if !ok {
 			continue
 		}
-		if h := ps.GetHeight(); h > maxPeerHeight {
-			maxPeerHeight = h
-		}
+		peerHeights = append(peerHeights, ps.GetHeight())
 	}
 
 	// Sole-validator status is read live from consensus state on every call, so it
@@ -470,22 +468,37 @@ func (conR *Reactor) isBehindRaw() bool {
 	// without any cached value to update. (A node partitioned before a set change
 	// can't observe the other side's update, but that only makes it report behind,
 	// which is correct.)
-	return conR.evaluateBehind(conR.getRoundState().Height, maxPeerHeight, len(peers), conR.conS.isLocalSoleValidator())
+	return conR.evaluateBehind(conR.getRoundState().Height, peerHeights, conR.conS.isLocalSoleValidator())
 }
+
+// minCorroboratingPeers is the fewest connected peers required before peer-height
+// lag is trusted. Peer heights come from unverified gossip (NewRoundStepMessage), and
+// with a single peer that peer is a trivial "majority"; requiring at least two means
+// no single peer can drive catching_up on its own. Below this we can't corroborate, so
+// the height-lag check abstains (the zero-peer rule still covers the no-peer case).
+const minCorroboratingPeers = 2
 
 // evaluateBehind is the pure lag decision. With no peers we can't observe progress,
 // so we report behind unless this node can finalize on its own (it's the sole
 // validator); a non-validator or a validator in a larger set genuinely needs peers.
-// A zero threshold disables the height-lag check (the zero-peer rule still applies).
-// maxPeerHeight == 0 means no peer height learned yet.
-func (conR *Reactor) evaluateBehind(myHeight, maxPeerHeight int64, nPeers int, isSoleValidator bool) bool {
-	if nPeers == 0 {
+// Otherwise we report behind only when a majority of at least minCorroboratingPeers
+// connected peers report a height more than catchUpLagThreshold ahead of ours, so an
+// inflated height from a single peer (or a minority) can't drive the signal. A zero
+// threshold disables the height-lag check; the zero-peer rule still applies.
+func (conR *Reactor) evaluateBehind(myHeight int64, peerHeights []int64, isSoleValidator bool) bool {
+	if len(peerHeights) == 0 {
 		return !isSoleValidator
 	}
-	if conR.catchUpLagThreshold <= 0 || maxPeerHeight == 0 {
+	if conR.catchUpLagThreshold <= 0 || len(peerHeights) < minCorroboratingPeers {
 		return false
 	}
-	return maxPeerHeight-myHeight > conR.catchUpLagThreshold
+	ahead := 0
+	for _, h := range peerHeights {
+		if h-myHeight > conR.catchUpLagThreshold {
+			ahead++
+		}
+	}
+	return 2*ahead > len(peerHeights)
 }
 
 // applyDebounceLocked requires the lag condition to hold for catchUpDebounce before

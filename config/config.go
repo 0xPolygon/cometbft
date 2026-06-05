@@ -1031,16 +1031,19 @@ type ConsensusConfig struct {
 	// BlockTimeTolerance is the maximum allowed difference between the proposed block time and wall-clock time.
 	BlockTimeTolerance time.Duration `mapstructure:"block_time_tolerance"`
 
-	// CatchupLagThreshold is how many blocks a peer may be ahead of us before we
-	// report catching_up=true. The reactor's WaitSync latch only reflects the
-	// initial block-sync at startup and stays false for the rest of the process, so
-	// without this check a node that later stops keeping up with its peers still
-	// reports catching_up=false. The comparison is against peer-reported heights
-	// rather than block-time staleness, so a network where every node has
-	// legitimately stopped at the same height is not misreported as catching up.
+	// CatchupLagThreshold is how many blocks ahead of us a peer must be to count as
+	// reporting us behind; catching_up=true requires a majority of connected peers to
+	// be that far ahead. The reactor's WaitSync latch only reflects the initial
+	// block-sync at startup and stays false for the rest of the process, so without
+	// this check a node that later stops keeping up with its peers still reports
+	// catching_up=false. The comparison is against peer-reported heights rather than
+	// block-time staleness, so a network where every node has legitimately stopped at
+	// the same height is not misreported as catching up; peer heights are unverified
+	// gossip, so the lag must be corroborated by a majority of at least two connected
+	// peers, which keeps a single peer from driving the signal.
 	// 0 disables peer-height lag detection only; must be >=2 when enabled to absorb
 	// the normal one-height round skew between synced peers. The separate zero-peer
-	// rule (a node with no peers in a multi-validator network reports catching_up)
+	// rule (a node with no peers that is not the sole validator reports catching_up)
 	// always applies, independent of this threshold.
 	CatchupLagThreshold int64 `mapstructure:"catchup_lag_threshold"`
 	// CatchupDebounceDuration is how long the peer-lag condition must hold

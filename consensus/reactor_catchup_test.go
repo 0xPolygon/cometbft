@@ -12,28 +12,33 @@ func TestEvaluateBehind(t *testing.T) {
 		name            string
 		lagThreshold    int64
 		myHeight        int64
-		maxPeerHeight   int64
-		nPeers          int
+		peerHeights     []int64
 		isSoleValidator bool
 		want            bool
 	}{
-		{"peer far ahead", 5, 100, 110, 3, false, true},
-		{"peer ahead within threshold", 5, 100, 105, 3, false, false},
-		{"peer one over threshold", 5, 100, 106, 3, false, true},
-		{"equal height network halt", 5, 100, 100, 3, false, false},
-		{"round skew peer one ahead", 5, 100, 101, 3, false, false},
-		{"no peer height learned", 5, 100, 0, 3, false, false},
-		{"threshold disabled ignores lag", 0, 100, 999, 3, false, false},
-		{"sole validator zero peers healthy", 5, 100, 0, 0, true, false},
-		{"non-sole zero peers behind", 5, 100, 0, 0, false, true},
-		{"zero peers behind even when lag disabled", 0, 100, 0, 0, false, true},
+		{"majority far ahead", 5, 100, []int64{110, 110, 110}, false, true},
+		{"single peer ahead is minority", 5, 100, []int64{110, 100, 100}, false, false},
+		{"majority of three ahead", 5, 100, []int64{110, 110, 100}, false, true},
+		{"two peers split is not majority", 5, 100, []int64{110, 100}, false, false},
+		{"both peers ahead", 5, 100, []int64{110, 110}, false, true},
+		{"lone peer cannot corroborate", 5, 100, []int64{110}, false, false},
+		{"lone peer far ahead still cannot corroborate", 5, 100, []int64{100000}, false, false},
+		{"peers within threshold", 5, 100, []int64{105, 105, 105}, false, false},
+		{"majority one over threshold", 5, 100, []int64{106, 106, 106}, false, true},
+		{"equal height network halt", 5, 100, []int64{100, 100, 100}, false, false},
+		{"round skew one ahead", 5, 100, []int64{101, 101, 101}, false, false},
+		{"no peer height learned", 5, 100, []int64{0, 0, 0}, false, false},
+		{"threshold disabled ignores lag", 0, 100, []int64{999, 999, 999}, false, false},
+		{"sole validator zero peers healthy", 5, 100, nil, true, false},
+		{"non-sole zero peers behind", 5, 100, nil, false, true},
+		{"zero peers behind even when lag disabled", 0, 100, nil, false, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			conR := &Reactor{
 				catchUpLagThreshold: tt.lagThreshold,
 			}
-			got := conR.evaluateBehind(tt.myHeight, tt.maxPeerHeight, tt.nPeers, tt.isSoleValidator)
+			got := conR.evaluateBehind(tt.myHeight, tt.peerHeights, tt.isSoleValidator)
 			assert.Equal(t, tt.want, got)
 		})
 	}
