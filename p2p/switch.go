@@ -13,6 +13,7 @@ import (
 	"github.com/cometbft/cometbft/libs/cmap"
 	"github.com/cometbft/cometbft/libs/rand"
 	"github.com/cometbft/cometbft/libs/service"
+	cmtsync "github.com/cometbft/cometbft/libs/sync"
 	"github.com/cometbft/cometbft/p2p/conn"
 )
 
@@ -20,6 +21,9 @@ const (
 	// wait a random amount of time from this interval
 	// before dialing peers or reconnecting to help prevent DoS
 	dialRandomizerIntervalMilliseconds = 3000
+
+	// the most randomSleep can add on top of the interval it is given
+	maxDialRandomizerInterval = dialRandomizerIntervalMilliseconds * time.Millisecond
 
 	// repeatedly try to reconnect for a few minutes
 	// ie. 5 * 20 = 100s
@@ -30,6 +34,13 @@ const (
 	// ie. 3**10 = 16hrs
 	reconnectBackOffAttempts    = 10
 	reconnectBackOffBaseSeconds = 3
+
+	// once backoff is exhausted, a peer that is still configured as persistent
+	// is redialed at this interval indefinitely. PEX cannot be relied on to
+	// restore the link: ensurePeers only dials when there is outbound headroom
+	// and picks from the addrbook at random, so a configured peer can stay
+	// unconnected until the node is restarted.
+	reconnectPersistentInterval = 10 * time.Minute
 )
 
 // MConnConfig returns an MConnConfig with fields updated
@@ -84,7 +95,11 @@ type Switch struct {
 	nodeInfo      NodeInfo // our node info
 	nodeKey       *NodeKey // our node privkey
 	addrBook      AddrBook
-	// peers addresses with whom we'll maintain constant connection
+	// operator-configured peer sets: addresses we maintain a constant
+	// connection to, and ids exempt from the peer limits. Both are guarded by
+	// peerCfgMtx because unsafe_dial_peers mutates them at runtime while the
+	// reconnect, accept and pex paths read them.
+	peerCfgMtx           cmtsync.RWMutex
 	persistentPeersAddrs []*NetAddress
 	unconditionalPeerIDs map[ID]struct{}
 
@@ -316,6 +331,9 @@ func (sw *Switch) NumPeers() (outbound, inbound, dialing int) {
 }
 
 func (sw *Switch) IsPeerUnconditional(id ID) bool {
+	sw.peerCfgMtx.RLock()
+	defer sw.peerCfgMtx.RUnlock()
+
 	_, ok := sw.unconditionalPeerIDs[id]
 	return ok
 }
@@ -342,17 +360,14 @@ func (sw *Switch) StopPeerForError(peer Peer, reason interface{}) {
 	sw.stopAndRemovePeer(peer, reason)
 
 	if peer.IsPersistent() {
-		var addr *NetAddress
-		if peer.IsOutbound() { // socket address for outbound peers
-			addr = peer.SocketAddr()
-		} else { // self-reported address for inbound peers
-			var err error
-			addr, err = peer.NodeInfo().NetAddress()
-			if err != nil {
-				sw.Logger.Error("Wanted to reconnect to inbound peer, but self-reported address is wrong",
-					"peer", peer, "err", err)
-				return
-			}
+		// redial the address the operator configured for this node ID, never
+		// the one the peer happened to be reached on: an inbound peer reports
+		// its own address, and pex can dial a configured peer at an addrbook
+		// address. Neither is what should be kept connected.
+		addr := sw.persistentAddr(peer.ID())
+		if addr == nil {
+			sw.Logger.Info("Peer is no longer a configured persistent peer. Not reconnecting", "peer", peer)
+			return
 		}
 		go sw.reconnectToPeer(addr)
 	}
@@ -388,16 +403,130 @@ func (sw *Switch) stopAndRemovePeer(peer Peer, reason interface{}) {
 	}
 }
 
-// reconnectToPeer tries to reconnect to the addr, first repeatedly
-// with a fixed interval (approximately 2 minutes), then with
-// exponential backoff (approximately close to 24 hours).
-// If no success after all that, it stops trying, and leaves it
-// to the PEX/Addrbook to find the peer with the addr again
+// dialForReconnect dials addr once and reports whether the reconnect loop is
+// done, either because the peer is back or because retrying is pointless.
 // NOTE: this will keep trying even if the handshake or auth fails.
 // TODO: be more explicit with error types so we only retry on certain failures
 //   - ie. if we're getting ErrDuplicatePeer we can stop
 //     because the addrbook got us the peer back already
+func (sw *Switch) dialForReconnect(addr *NetAddress, tries int) bool {
+	if !sw.IsRunning() {
+		return true
+	}
+
+	// only a peer that is actually connected ends the reconnect.
+	// ErrCurrentlyDialingOrExistingAddress deliberately does not: a concurrent
+	// pex dial, or an unrelated peer holding the same IP, raises it while this
+	// address is still unconnected, and ending here would abandon the address
+	// even though nothing reconnected it.
+	if sw.peers.Has(addr.ID) {
+		return true
+	}
+
+	err := sw.DialPeerWithAddress(addr)
+	if err == nil {
+		return true // success
+	}
+	if isTerminalDialErr(err) {
+		sw.Logger.Error("Peer cannot be dialed. Giving up", "addr", addr, "err", err, "tries", tries)
+		return true
+	}
+
+	sw.Logger.Info("Error reconnecting to peer. Trying again", "tries", tries, "err", err, "addr", addr)
+	return false
+}
+
+// reconnectPolicy is the retry schedule reconnectToPeer follows. It is a
+// parameter so tests can drive the whole schedule, including what happens once
+// backoff is exhausted, without waiting out the production timings.
+type reconnectPolicy struct {
+	attempts        int
+	interval        time.Duration
+	backOffAttempts int
+	backOffBase     float64
+	persistentEvery time.Duration
+}
+
+func (sw *Switch) defaultReconnectPolicy() reconnectPolicy {
+	return reconnectPolicy{
+		attempts:        reconnectAttempts,
+		interval:        reconnectInterval,
+		backOffAttempts: reconnectBackOffAttempts,
+		backOffBase:     reconnectBackOffBaseSeconds,
+		persistentEvery: sw.persistentRedialInterval(),
+	}
+}
+
+// persistentRedialInterval is how often a configured persistent peer is
+// redialed once backoff is exhausted. PersistentPeersMaxDialPeriod is the
+// operator's existing knob for bounding how slowly a persistent peer gets
+// redialed, so honor it rather than adding a second one. It caps the pause, so
+// it can only shorten the default; it defaults to 0, meaning unset. It is
+// floored at reconnectInterval so that a very small value cannot turn this into
+// a dial loop holding an outbound slot that PEX counts as in use.
+//
+// randomSleep adds up to maxDialRandomizerInterval of jitter on top, so that
+// much is subtracted here: the configured value is a maximum pause, and the
+// sleep it produces has to stay under it.
+func (sw *Switch) persistentRedialInterval() time.Duration {
+	capped := reconnectPersistentInterval
+	if d := sw.config.PersistentPeersMaxDialPeriod; d > 0 && d < capped {
+		capped = d
+	}
+	if capped < reconnectInterval {
+		capped = reconnectInterval
+	}
+
+	if capped > maxDialRandomizerInterval {
+		return capped - maxDialRandomizerInterval
+	}
+	return 0
+}
+
+// reconnectToPeer tries to reconnect to the addr, first repeatedly
+// with a fixed interval (approximately 2 minutes), then with
+// exponential backoff (approximately close to 24 hours).
+// A peer that is still configured as persistent once backoff is exhausted is
+// then redialed at reconnectPersistentInterval for as long as the switch runs,
+// because nothing else in the stack is guaranteed to restore that link.
+// Any other addr is left to the PEX/Addrbook to find again.
 func (sw *Switch) reconnectToPeer(addr *NetAddress) {
+	sw.reconnectToPeerWithPolicy(addr, sw.defaultReconnectPolicy())
+}
+
+// dialAtFixedInterval runs the fixed-interval phase of the schedule and reports
+// whether the reconnect is finished.
+func (sw *Switch) dialAtFixedInterval(addr *NetAddress, policy reconnectPolicy) bool {
+	for i := 0; i < policy.attempts; i++ {
+		if sw.dialForReconnect(addr, i) {
+			return true
+		}
+		// sleep a set amount
+		if !sw.randomSleep(policy.interval) {
+			return true
+		}
+	}
+	return false
+}
+
+// dialWithBackOff runs the exponential-backoff phase of the schedule and
+// reports whether the reconnect is finished.
+func (sw *Switch) dialWithBackOff(addr *NetAddress, policy reconnectPolicy) bool {
+	for i := 1; i <= policy.backOffAttempts; i++ {
+		// sleep an exponentially increasing amount
+		sleepIntervalSeconds := math.Pow(policy.backOffBase, float64(i))
+		if !sw.randomSleep(time.Duration(sleepIntervalSeconds) * time.Second) {
+			return true
+		}
+
+		if sw.dialForReconnect(addr, i) {
+			return true
+		}
+	}
+	return false
+}
+
+func (sw *Switch) reconnectToPeerWithPolicy(addr *NetAddress, policy reconnectPolicy) {
 	if sw.reconnecting.Has(string(addr.ID)) {
 		return
 	}
@@ -407,44 +536,68 @@ func (sw *Switch) reconnectToPeer(addr *NetAddress) {
 	start := time.Now()
 	sw.Logger.Info("Reconnecting to peer", "addr", addr)
 
-	for i := 0; i < reconnectAttempts; i++ {
-		if !sw.IsRunning() {
-			return
-		}
-
-		err := sw.DialPeerWithAddress(addr)
-		if err == nil {
-			return // success
-		} else if _, ok := err.(ErrCurrentlyDialingOrExistingAddress); ok {
-			return
-		}
-
-		sw.Logger.Info("Error reconnecting to peer. Trying again", "tries", i, "err", err, "addr", addr)
-		// sleep a set amount
-		sw.randomSleep(reconnectInterval)
-		continue
+	if sw.dialAtFixedInterval(addr, policy) {
+		return
 	}
 
 	sw.Logger.Error("Failed to reconnect to peer. Beginning exponential backoff",
 		"addr", addr, "elapsed", time.Since(start))
-	for i := 1; i <= reconnectBackOffAttempts; i++ {
-		if !sw.IsRunning() {
-			return
-		}
 
-		// sleep an exponentially increasing amount
-		sleepIntervalSeconds := math.Pow(reconnectBackOffBaseSeconds, float64(i))
-		sw.randomSleep(time.Duration(sleepIntervalSeconds) * time.Second)
-
-		err := sw.DialPeerWithAddress(addr)
-		if err == nil {
-			return // success
-		} else if _, ok := err.(ErrCurrentlyDialingOrExistingAddress); ok {
-			return
-		}
-		sw.Logger.Info("Error reconnecting to peer. Trying again", "tries", i, "err", err, "addr", addr)
+	if sw.dialWithBackOff(addr, policy) {
+		return
 	}
-	sw.Logger.Error("Failed to reconnect to peer. Giving up", "addr", addr, "elapsed", time.Since(start))
+
+	if !sw.IsPeerPersistent(addr) {
+		sw.Logger.Error("Failed to reconnect to peer. Giving up", "addr", addr, "elapsed", time.Since(start))
+		return
+	}
+
+	sw.Logger.Error("Failed to reconnect to persistent peer. Retrying at a fixed interval",
+		"addr", addr, "elapsed", time.Since(start), "interval", policy.persistentEvery)
+	sw.keepDialingPersistentPeer(addr, policy.persistentEvery)
+}
+
+// isTerminalDialErr reports whether retrying the dial is pointless. Only our
+// own address qualifies: the switch has already moved it to ourAddrs, so no
+// amount of retrying can connect it. An authentication failure deliberately
+// does not qualify, since a peer can serve an unexpected key temporarily while
+// being upgraded, and giving up on it would reintroduce the dropped link.
+func isTerminalDialErr(err error) bool {
+	var rejected ErrRejected
+	if errors.As(err, &rejected) {
+		return rejected.IsSelf()
+	}
+	return false
+}
+
+// keepDialingPersistentPeer redials addr every interval for as long as it stays
+// configured as persistent and the switch is running. Unlike the bounded phases
+// of reconnectToPeer it never abandons the address: the operator asked for a
+// constant connection, and nothing else in the stack reliably re-establishes
+// it. PEX only dials when there is spare outbound capacity and then picks from
+// the addrbook at random, so a dropped persistent peer can otherwise stay
+// unconnected until the node restarts.
+//
+// Persistence is re-read after every sleep, so removing the address from the
+// configured set (AddPersistentPeers, which replaces the set rather than
+// extending it) is what stops this loop short of a successful dial. The check
+// has to happen after waking rather than only before sleeping, otherwise an
+// address removed mid-sleep still gets one more dial and could be reconnected
+// behind the operator's back.
+func (sw *Switch) keepDialingPersistentPeer(addr *NetAddress, interval time.Duration) {
+	for i := 1; sw.IsPeerPersistent(addr); i++ {
+		if !sw.randomSleep(interval) {
+			return
+		}
+		if !sw.IsPeerPersistent(addr) {
+			break
+		}
+
+		if sw.dialForReconnect(addr, i) {
+			return
+		}
+	}
+	sw.Logger.Info("Peer is no longer persistent. Stopped reconnecting", "addr", addr)
 }
 
 // SetAddrBook allows to set address book on Switch.
@@ -532,7 +685,9 @@ func (sw *Switch) dialPeersAsync(netAddrs []*NetAddress) {
 				return
 			}
 
-			sw.randomSleep(0)
+			if !sw.randomSleep(0) {
+				return
+			}
 
 			err := sw.DialPeerWithAddress(addr)
 			if err != nil {
@@ -562,10 +717,22 @@ func (sw *Switch) DialPeerWithAddress(addr *NetAddress) error {
 	return sw.addOutboundPeerWithConfig(addr, sw.config)
 }
 
-// sleep for interval plus some random amount of ms on [0, dialRandomizerIntervalMilliseconds]
-func (sw *Switch) randomSleep(interval time.Duration) {
+// sleep for interval plus some random amount of ms on [0, dialRandomizerIntervalMilliseconds].
+// It reports false if the switch stopped before the interval elapsed, so callers
+// that sleep in a loop terminate on shutdown instead of outliving the switch.
+func (sw *Switch) randomSleep(interval time.Duration) bool {
 	r := time.Duration(sw.rng.Int63n(dialRandomizerIntervalMilliseconds)) * time.Millisecond
-	time.Sleep(r + interval)
+	timer := time.NewTimer(r + interval)
+	defer timer.Stop()
+
+	select {
+	case <-timer.C:
+		// select picks at random when both are ready, so a sleep that expires
+		// exactly as the switch stops must not report success
+		return sw.IsRunning()
+	case <-sw.Quit():
+		return false
+	}
 }
 
 // IsDialingOrExistingAddress returns true if switch has a peer with the given
@@ -593,18 +760,30 @@ func (sw *Switch) AddPersistentPeers(addrs []string) error {
 		}
 		return err
 	}
+	sw.peerCfgMtx.Lock()
 	sw.persistentPeersAddrs = netAddrs
+	sw.peerCfgMtx.Unlock()
 	return nil
 }
 
 func (sw *Switch) AddUnconditionalPeerIDs(ids []string) error {
 	sw.Logger.Info("Adding unconditional peer ids", "ids", ids)
+
+	// validate every id before storing any, so a bad entry late in the list
+	// cannot leave the set half updated
+	validIDs := make([]ID, 0, len(ids))
 	for i, id := range ids {
-		err := validateID(ID(id))
-		if err != nil {
+		if err := validateID(ID(id)); err != nil {
 			return fmt.Errorf("wrong ID #%d: %w", i, err)
 		}
-		sw.unconditionalPeerIDs[ID(id)] = struct{}{}
+		validIDs = append(validIDs, ID(id))
+	}
+
+	sw.peerCfgMtx.Lock()
+	defer sw.peerCfgMtx.Unlock()
+
+	for _, id := range validIDs {
+		sw.unconditionalPeerIDs[id] = struct{}{}
 	}
 	return nil
 }
@@ -624,7 +803,36 @@ func (sw *Switch) AddPrivatePeerIDs(ids []string) error {
 	return nil
 }
 
+// persistentAddr returns the address configured for id in persistent_peers, or
+// nil if the id is not configured. Matching on the node ID is sound because the
+// secret handshake authenticates it, whereas the address a peer reports about
+// itself is unverified — which is why the returned address, not the reported
+// one, is what gets dialed. The returned address is shared with every other
+// reader of the configured set and must not be mutated.
+func (sw *Switch) persistentAddr(id ID) *NetAddress {
+	sw.peerCfgMtx.RLock()
+	defer sw.peerCfgMtx.RUnlock()
+
+	for _, pa := range sw.persistentPeersAddrs {
+		if pa.ID == id {
+			return pa
+		}
+	}
+	return nil
+}
+
+// isPersistentPeerID reports whether id is configured in persistent_peers,
+// regardless of the address it is currently reachable on. Inbound peers are
+// classified with this rather than IsPeerPersistent, because the address they
+// report about themselves rarely matches the configured entry.
+func (sw *Switch) isPersistentPeerID(id ID) bool {
+	return sw.persistentAddr(id) != nil
+}
+
 func (sw *Switch) IsPeerPersistent(na *NetAddress) bool {
+	sw.peerCfgMtx.RLock()
+	defer sw.peerCfgMtx.RUnlock()
+
 	for _, pa := range sw.persistentPeersAddrs {
 		if pa.Equals(na) {
 			return true
@@ -642,7 +850,7 @@ func (sw *Switch) acceptRoutine() {
 			msgTypeByChID: sw.msgTypeByChID,
 			metrics:       sw.metrics,
 			mlc:           sw.mlc,
-			isPersistent:  sw.IsPeerPersistent,
+			isPersistent:  sw.isPersistentPeerID,
 		})
 		if err != nil {
 			switch err := err.(type) {
@@ -743,7 +951,7 @@ func (sw *Switch) addOutboundPeerWithConfig(
 	p, err := sw.transport.Dial(*addr, peerConfig{
 		chDescs:       sw.chDescs,
 		onPeerError:   sw.StopPeerForError,
-		isPersistent:  sw.IsPeerPersistent,
+		isPersistent:  sw.isPersistentPeerID,
 		reactorsByCh:  sw.reactorsByCh,
 		msgTypeByChID: sw.msgTypeByChID,
 		metrics:       sw.metrics,
