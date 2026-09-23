@@ -360,20 +360,14 @@ func (sw *Switch) StopPeerForError(peer Peer, reason interface{}) {
 	sw.stopAndRemovePeer(peer, reason)
 
 	if peer.IsPersistent() {
-		var addr *NetAddress
-		if peer.IsOutbound() { // socket address for outbound peers
-			addr = peer.SocketAddr()
-		} else {
-			// an inbound peer reports its own listen address, and with an
-			// unset external_address that is 0.0.0.0, which never matches the
-			// configured entry. Redial what the operator configured for this
-			// node ID, never what the peer claims about itself.
-			addr = sw.persistentAddr(peer.ID())
-			if addr == nil {
-				sw.Logger.Error("Wanted to reconnect to inbound peer, but it is no longer a configured persistent peer",
-					"peer", peer)
-				return
-			}
+		// redial the address the operator configured for this node ID, never
+		// the one the peer happened to be reached on: an inbound peer reports
+		// its own address, and pex can dial a configured peer at an addrbook
+		// address. Neither is what should be kept connected.
+		addr := sw.persistentAddr(peer.ID())
+		if addr == nil {
+			sw.Logger.Info("Peer is no longer a configured persistent peer. Not reconnecting", "peer", peer)
+			return
 		}
 		go sw.reconnectToPeer(addr)
 	}
@@ -420,10 +414,21 @@ func (sw *Switch) dialForReconnect(addr *NetAddress, tries int) bool {
 		return true
 	}
 
+	// only a peer that is actually connected ends the reconnect.
+	// ErrCurrentlyDialingOrExistingAddress deliberately does not: a concurrent
+	// pex dial, or an unrelated peer holding the same IP, raises it while this
+	// address is still unconnected, and ending here would abandon the address
+	// even though nothing reconnected it.
+	if sw.peers.Has(addr.ID) {
+		return true
+	}
+
 	err := sw.DialPeerWithAddress(addr)
 	if err == nil {
 		return true // success
-	} else if _, ok := err.(ErrCurrentlyDialingOrExistingAddress); ok {
+	}
+	if isTerminalDialErr(err) {
+		sw.Logger.Error("Peer cannot be dialed. Giving up", "addr", addr, "err", err, "tries", tries)
 		return true
 	}
 
@@ -588,40 +593,11 @@ func (sw *Switch) keepDialingPersistentPeer(addr *NetAddress, interval time.Dura
 			break
 		}
 
-		if sw.dialPersistentPeer(addr, i) {
+		if sw.dialForReconnect(addr, i) {
 			return
 		}
 	}
 	sw.Logger.Info("Peer is no longer persistent. Stopped reconnecting", "addr", addr)
-}
-
-// dialPersistentPeer dials addr once and reports whether the persistent phase
-// is over, which only a live peer or an undialable address can decide.
-// dialForReconnect is deliberately not reused here: it also reports done for
-// ErrCurrentlyDialingOrExistingAddress, which a concurrent PEX dial or an
-// unrelated peer holding the same IP can trigger while this address is still
-// unconnected, and treating that as success would abandon the address for good
-func (sw *Switch) dialPersistentPeer(addr *NetAddress, tries int) bool {
-	if sw.peers.Has(addr.ID) {
-		sw.Logger.Info("Persistent peer is connected again. Stopped reconnecting",
-			"addr", addr, "tries", tries)
-		return true
-	}
-
-	err := sw.DialPeerWithAddress(addr)
-	if err == nil {
-		sw.Logger.Info("Reconnected to persistent peer", "addr", addr, "tries", tries)
-		return true
-	}
-	if isTerminalDialErr(err) {
-		sw.Logger.Error("Persistent peer cannot be dialed. Giving up",
-			"addr", addr, "err", err, "tries", tries)
-		return true
-	}
-
-	sw.Logger.Info("Error reconnecting to persistent peer. Trying again",
-		"tries", tries, "err", err, "addr", addr)
-	return false
 }
 
 // SetAddrBook allows to set address book on Switch.
@@ -868,14 +844,13 @@ func (sw *Switch) IsPeerPersistent(na *NetAddress) bool {
 func (sw *Switch) acceptRoutine() {
 	for {
 		p, err := sw.transport.Accept(peerConfig{
-			chDescs:        sw.chDescs,
-			onPeerError:    sw.StopPeerForError,
-			reactorsByCh:   sw.reactorsByCh,
-			msgTypeByChID:  sw.msgTypeByChID,
-			metrics:        sw.metrics,
-			mlc:            sw.mlc,
-			isPersistent:   sw.IsPeerPersistent,
-			isPersistentID: sw.isPersistentPeerID,
+			chDescs:       sw.chDescs,
+			onPeerError:   sw.StopPeerForError,
+			reactorsByCh:  sw.reactorsByCh,
+			msgTypeByChID: sw.msgTypeByChID,
+			metrics:       sw.metrics,
+			mlc:           sw.mlc,
+			isPersistent:  sw.isPersistentPeerID,
 		})
 		if err != nil {
 			switch err := err.(type) {
@@ -974,14 +949,13 @@ func (sw *Switch) addOutboundPeerWithConfig(
 	}
 
 	p, err := sw.transport.Dial(*addr, peerConfig{
-		chDescs:        sw.chDescs,
-		onPeerError:    sw.StopPeerForError,
-		isPersistent:   sw.IsPeerPersistent,
-		isPersistentID: sw.isPersistentPeerID,
-		reactorsByCh:   sw.reactorsByCh,
-		msgTypeByChID:  sw.msgTypeByChID,
-		metrics:        sw.metrics,
-		mlc:            sw.mlc,
+		chDescs:       sw.chDescs,
+		onPeerError:   sw.StopPeerForError,
+		isPersistent:  sw.isPersistentPeerID,
+		reactorsByCh:  sw.reactorsByCh,
+		msgTypeByChID: sw.msgTypeByChID,
+		metrics:       sw.metrics,
+		mlc:           sw.mlc,
 	})
 	if err != nil {
 		if e, ok := err.(ErrRejected); ok {

@@ -262,7 +262,7 @@ func TestSwitchPeerFilter(t *testing.T) {
 	p, err := sw.transport.Dial(*rp.Addr(), peerConfig{
 		chDescs:      sw.chDescs,
 		onPeerError:  sw.StopPeerForError,
-		isPersistent: sw.IsPeerPersistent,
+		isPersistent: sw.isPersistentPeerID,
 		reactorsByCh: sw.reactorsByCh,
 	})
 	if err != nil {
@@ -311,7 +311,7 @@ func TestSwitchPeerFilterTimeout(t *testing.T) {
 	p, err := sw.transport.Dial(*rp.Addr(), peerConfig{
 		chDescs:      sw.chDescs,
 		onPeerError:  sw.StopPeerForError,
-		isPersistent: sw.IsPeerPersistent,
+		isPersistent: sw.isPersistentPeerID,
 		reactorsByCh: sw.reactorsByCh,
 	})
 	if err != nil {
@@ -342,7 +342,7 @@ func TestSwitchPeerFilterDuplicate(t *testing.T) {
 	p, err := sw.transport.Dial(*rp.Addr(), peerConfig{
 		chDescs:      sw.chDescs,
 		onPeerError:  sw.StopPeerForError,
-		isPersistent: sw.IsPeerPersistent,
+		isPersistent: sw.isPersistentPeerID,
 		reactorsByCh: sw.reactorsByCh,
 	})
 	if err != nil {
@@ -392,7 +392,7 @@ func TestSwitchStopsNonPersistentPeerOnError(t *testing.T) {
 	p, err := sw.transport.Dial(*rp.Addr(), peerConfig{
 		chDescs:      sw.chDescs,
 		onPeerError:  sw.StopPeerForError,
-		isPersistent: sw.IsPeerPersistent,
+		isPersistent: sw.isPersistentPeerID,
 		reactorsByCh: sw.reactorsByCh,
 	})
 	require.Nil(err)
@@ -983,6 +983,41 @@ func TestSwitchConfiguredPeerSetsAreRaceFree(t *testing.T) {
 	time.Sleep(250 * time.Millisecond)
 	close(stop)
 	wg.Wait()
+}
+
+// pex can dial a configured peer at an address it learned from the addrbook,
+// which is not the configured one — sentries advertise a public
+// external_address while the mesh is configured on internal addresses. Such a
+// peer must still count as persistent, or the link is abandoned when it drops
+// and the configured address is never redialed.
+func TestSwitchClassifiesOutboundPersistentPeerDialedAtAnotherAddress(t *testing.T) {
+	sw := MakeSwitch(cfg, 1, initSwitchFunc)
+	require.NoError(t, sw.Start())
+	t.Cleanup(func() {
+		if err := sw.Stop(); err != nil {
+			t.Error(err)
+		}
+	})
+
+	rp := &remotePeer{PrivKey: ed25519.GenPrivKey(), Config: cfg}
+	rp.Start()
+	defer rp.Stop()
+
+	// configure the peer at an address it is not reachable on, then dial it at
+	// the one it actually listens on, the way a pex-supplied address would
+	configured, err := NewNetAddressString(
+		IDAddressString(rp.ID(), "10.255.255.1:26656"))
+	require.NoError(t, err)
+	require.NoError(t, sw.AddPersistentPeers([]string{configured.String()}))
+	require.False(t, sw.IsPeerPersistent(rp.Addr()), "the dialed address is not the configured one")
+
+	require.NoError(t, sw.DialPeerWithAddress(rp.Addr()))
+
+	p := sw.Peers().Get(rp.ID())
+	require.NotNil(t, p)
+	require.True(t, p.IsOutbound())
+	assert.True(t, p.IsPersistent(),
+		"a configured peer dialed at another address must still be persistent")
 }
 
 // End-to-end version of the above, through accept, classification and redial.
