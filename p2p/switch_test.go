@@ -985,16 +985,55 @@ func TestSwitchConfiguredPeerSetsAreRaceFree(t *testing.T) {
 	wg.Wait()
 }
 
+// An address removed while the loop is asleep must not get one more dial, or
+// the switch could reconnect a peer the operator just took out of the set.
+func TestSwitchDoesNotDialPeerDeconfiguredDuringSleep(t *testing.T) {
+	sw := MakeSwitch(cfg, 1, initSwitchFunc)
+	require.NoError(t, sw.Start())
+	t.Cleanup(func() {
+		if err := sw.Stop(); err != nil {
+			t.Error(err)
+		}
+	})
+
+	bp := newBlackholePeer(t)
+	addr := bp.addr()
+	require.NoError(t, sw.AddPersistentPeers([]string{addr.String()}))
+	sw.reconnecting.Set(string(addr.ID), addr)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		sw.keepDialingPersistentPeer(addr, 3*time.Second)
+	}()
+
+	// wait for a dial so the loop is known to be running, which puts it at the
+	// start of the next sleep and leaves a wide window to de-configure in
+	bp.waitForDials(t, 1, 30*time.Second)
+	dialsBefore := bp.attempts.Load()
+	require.NoError(t, sw.AddPersistentPeers([]string{}))
+
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("kept reconnecting to an address that is no longer persistent")
+	}
+	assert.Equal(t, dialsBefore, bp.attempts.Load(),
+		"no further dial should happen after the address was removed")
+}
+
+// The configured value is a maximum pause, so the interval plus the jitter
+// randomSleep adds must stay within it.
 func TestSwitchPersistentRedialInterval(t *testing.T) {
 	testCases := []struct {
-		name     string
-		maxDial  time.Duration
-		expected time.Duration
+		name    string
+		maxDial time.Duration
+		cap     time.Duration
 	}{
-		{name: "unset falls back to the default", maxDial: 0, expected: reconnectPersistentInterval},
-		{name: "longer than the default is ignored", maxDial: time.Hour, expected: reconnectPersistentInterval},
-		{name: "shorter than the default caps the pause", maxDial: time.Minute, expected: time.Minute},
-		{name: "below the floor is clamped", maxDial: time.Millisecond, expected: reconnectInterval},
+		{name: "unset falls back to the default", maxDial: 0, cap: reconnectPersistentInterval},
+		{name: "longer than the default is ignored", maxDial: time.Hour, cap: reconnectPersistentInterval},
+		{name: "shorter than the default caps the pause", maxDial: time.Minute, cap: time.Minute},
+		{name: "below the floor is clamped", maxDial: time.Millisecond, cap: reconnectInterval},
 	}
 
 	for _, tc := range testCases {
@@ -1003,8 +1042,11 @@ func TestSwitchPersistentRedialInterval(t *testing.T) {
 			conf.PersistentPeersMaxDialPeriod = tc.maxDial
 			sw := MakeSwitch(conf, 1, initSwitchFunc)
 
-			assert.Equal(t, tc.expected, sw.persistentRedialInterval())
-			assert.Equal(t, tc.expected, sw.defaultReconnectPolicy().persistentEvery)
+			interval := sw.persistentRedialInterval()
+			assert.Equal(t, tc.cap-maxDialRandomizerInterval, interval)
+			assert.Equal(t, interval+maxDialRandomizerInterval, tc.cap,
+				"the longest possible sleep must not exceed the configured maximum")
+			assert.Equal(t, interval, sw.defaultReconnectPolicy().persistentEvery)
 		})
 	}
 }

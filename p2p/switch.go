@@ -22,6 +22,9 @@ const (
 	// before dialing peers or reconnecting to help prevent DoS
 	dialRandomizerIntervalMilliseconds = 3000
 
+	// the most randomSleep can add on top of the interval it is given
+	maxDialRandomizerInterval = dialRandomizerIntervalMilliseconds * time.Millisecond
+
 	// repeatedly try to reconnect for a few minutes
 	// ie. 5 * 20 = 100s
 	reconnectAttempts = 20
@@ -453,15 +456,23 @@ func (sw *Switch) defaultReconnectPolicy() reconnectPolicy {
 // it can only shorten the default; it defaults to 0, meaning unset. It is
 // floored at reconnectInterval so that a very small value cannot turn this into
 // a dial loop holding an outbound slot that PEX counts as in use.
+//
+// randomSleep adds up to maxDialRandomizerInterval of jitter on top, so that
+// much is subtracted here: the configured value is a maximum pause, and the
+// sleep it produces has to stay under it.
 func (sw *Switch) persistentRedialInterval() time.Duration {
-	d := sw.config.PersistentPeersMaxDialPeriod
-	if d <= 0 || d > reconnectPersistentInterval {
-		return reconnectPersistentInterval
+	capped := reconnectPersistentInterval
+	if d := sw.config.PersistentPeersMaxDialPeriod; d > 0 && d < capped {
+		capped = d
 	}
-	if d < reconnectInterval {
-		return reconnectInterval
+	if capped < reconnectInterval {
+		capped = reconnectInterval
 	}
-	return d
+
+	if capped > maxDialRandomizerInterval {
+		return capped - maxDialRandomizerInterval
+	}
+	return 0
 }
 
 // reconnectToPeer tries to reconnect to the addr, first repeatedly
@@ -559,16 +570,19 @@ func isTerminalDialErr(err error) bool {
 // the addrbook at random, so a dropped persistent peer can otherwise stay
 // unconnected until the node restarts.
 //
-// Persistence is re-read every iteration, so removing the address from the
+// Persistence is re-read after every sleep, so removing the address from the
 // configured set (AddPersistentPeers, which replaces the set rather than
-// extending it) is what stops this loop short of a successful dial.
+// extending it) is what stops this loop short of a successful dial. The check
+// has to happen after waking rather than only before sleeping, otherwise an
+// address removed mid-sleep still gets one more dial and could be reconnected
+// behind the operator's back.
 func (sw *Switch) keepDialingPersistentPeer(addr *NetAddress, interval time.Duration) {
 	for i := 1; sw.IsPeerPersistent(addr); i++ {
 		if !sw.randomSleep(interval) {
 			return
 		}
-		if !sw.IsRunning() {
-			return
+		if !sw.IsPeerPersistent(addr) {
+			break
 		}
 
 		if sw.dialPersistentPeer(addr, i) {
@@ -734,7 +748,9 @@ func (sw *Switch) randomSleep(interval time.Duration) bool {
 
 	select {
 	case <-timer.C:
-		return true
+		// select picks at random when both are ready, so a sleep that expires
+		// exactly as the switch stops must not report success
+		return sw.IsRunning()
 	case <-sw.Quit():
 		return false
 	}
