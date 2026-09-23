@@ -985,6 +985,81 @@ func TestSwitchConfiguredPeerSetsAreRaceFree(t *testing.T) {
 	wg.Wait()
 }
 
+// End-to-end version of the above, through accept, classification and redial.
+// The peer reports an address it cannot be reached on, exactly as a node with
+// an unset external_address does, so the link can only come back if the switch
+// recognizes it by node ID and redials the configured address instead.
+func TestSwitchReconnectsInboundPersistentPeerReportingAnotherAddress(t *testing.T) {
+	sw := MakeSwitch(cfg, 1, initSwitchFunc)
+	require.NoError(t, sw.Start())
+	t.Cleanup(func() {
+		if err := sw.Stop(); err != nil {
+			t.Error(err)
+		}
+	})
+
+	rp := &remotePeer{PrivKey: ed25519.GenPrivKey(), Config: cfg, reportAddr: "0.0.0.0:26656"}
+	rp.Start()
+	defer rp.Stop()
+	require.NoError(t, sw.AddPersistentPeers([]string{rp.Addr().String()}))
+
+	conn, err := rp.Dial(sw.NetAddress())
+	require.NoError(t, err)
+	time.Sleep(50 * time.Millisecond)
+
+	p := sw.Peers().Get(rp.ID())
+	require.NotNil(t, p)
+	require.False(t, p.IsOutbound(), "the switch must be holding this peer inbound")
+	assert.True(t, p.IsPersistent(),
+		"an inbound peer must be classified by node ID, not by the address it reports")
+
+	require.NoError(t, conn.Close())
+
+	// redialing what the peer reported would never connect, so the link only
+	// returns if the configured address was used
+	waitUntilSwitchHasAtLeastNPeers(sw, 1)
+	assert.Equal(t, 1, sw.Peers().Size())
+}
+
+// A peer held inbound reports its own listen address, which is routinely not
+// the configured entry: an unset external_address reports 0.0.0.0. Matching on
+// the address alone therefore fails to recognize it as persistent, so it is
+// matched by node ID and redialed at the configured address instead.
+func TestSwitchPersistentPeerMatchedByIDNotAddress(t *testing.T) {
+	sw := MakeSwitch(cfg, 1, initSwitchFunc)
+	require.NoError(t, sw.Start())
+	t.Cleanup(func() {
+		if err := sw.Stop(); err != nil {
+			t.Error(err)
+		}
+	})
+
+	configured := newBlackholePeer(t).addr()
+	require.NoError(t, sw.AddPersistentPeers([]string{configured.String()}))
+
+	selfReported, err := NewNetAddressString(
+		IDAddressString(configured.ID, "0.0.0.0:26656"))
+	require.NoError(t, err)
+
+	assert.False(t, sw.IsPeerPersistent(selfReported),
+		"the self-reported address does not match the configured entry")
+	assert.True(t, sw.isPersistentPeerID(configured.ID),
+		"the same peer must still be recognized by its authenticated node ID")
+	resolved := sw.persistentAddr(configured.ID)
+	require.NotNil(t, resolved)
+	assert.True(t, resolved.Equals(configured),
+		"the configured address is what gets dialed, never the self-reported one")
+	assert.False(t, resolved.Equals(selfReported))
+
+	other := newBlackholePeer(t).addr()
+	assert.False(t, sw.isPersistentPeerID(other.ID))
+	assert.Nil(t, sw.persistentAddr(other.ID))
+
+	require.NoError(t, sw.AddPersistentPeers([]string{}))
+	assert.False(t, sw.isPersistentPeerID(configured.ID))
+	assert.Nil(t, sw.persistentAddr(configured.ID))
+}
+
 // An address removed while the loop is asleep must not get one more dial, or
 // the switch could reconnect a peer the operator just took out of the set.
 func TestSwitchDoesNotDialPeerDeconfiguredDuringSleep(t *testing.T) {

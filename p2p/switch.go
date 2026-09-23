@@ -363,12 +363,15 @@ func (sw *Switch) StopPeerForError(peer Peer, reason interface{}) {
 		var addr *NetAddress
 		if peer.IsOutbound() { // socket address for outbound peers
 			addr = peer.SocketAddr()
-		} else { // self-reported address for inbound peers
-			var err error
-			addr, err = peer.NodeInfo().NetAddress()
-			if err != nil {
-				sw.Logger.Error("Wanted to reconnect to inbound peer, but self-reported address is wrong",
-					"peer", peer, "err", err)
+		} else {
+			// an inbound peer reports its own listen address, and with an
+			// unset external_address that is 0.0.0.0, which never matches the
+			// configured entry. Redial what the operator configured for this
+			// node ID, never what the peer claims about itself.
+			addr = sw.persistentAddr(peer.ID())
+			if addr == nil {
+				sw.Logger.Error("Wanted to reconnect to inbound peer, but it is no longer a configured persistent peer",
+					"peer", peer)
 				return
 			}
 		}
@@ -824,6 +827,32 @@ func (sw *Switch) AddPrivatePeerIDs(ids []string) error {
 	return nil
 }
 
+// persistentAddr returns the address configured for id in persistent_peers, or
+// nil if the id is not configured. Matching on the node ID is sound because the
+// secret handshake authenticates it, whereas the address a peer reports about
+// itself is unverified — which is why the returned address, not the reported
+// one, is what gets dialed. The returned address is shared with every other
+// reader of the configured set and must not be mutated.
+func (sw *Switch) persistentAddr(id ID) *NetAddress {
+	sw.peerCfgMtx.RLock()
+	defer sw.peerCfgMtx.RUnlock()
+
+	for _, pa := range sw.persistentPeersAddrs {
+		if pa.ID == id {
+			return pa
+		}
+	}
+	return nil
+}
+
+// isPersistentPeerID reports whether id is configured in persistent_peers,
+// regardless of the address it is currently reachable on. Inbound peers are
+// classified with this rather than IsPeerPersistent, because the address they
+// report about themselves rarely matches the configured entry.
+func (sw *Switch) isPersistentPeerID(id ID) bool {
+	return sw.persistentAddr(id) != nil
+}
+
 func (sw *Switch) IsPeerPersistent(na *NetAddress) bool {
 	sw.peerCfgMtx.RLock()
 	defer sw.peerCfgMtx.RUnlock()
@@ -839,13 +868,14 @@ func (sw *Switch) IsPeerPersistent(na *NetAddress) bool {
 func (sw *Switch) acceptRoutine() {
 	for {
 		p, err := sw.transport.Accept(peerConfig{
-			chDescs:       sw.chDescs,
-			onPeerError:   sw.StopPeerForError,
-			reactorsByCh:  sw.reactorsByCh,
-			msgTypeByChID: sw.msgTypeByChID,
-			metrics:       sw.metrics,
-			mlc:           sw.mlc,
-			isPersistent:  sw.IsPeerPersistent,
+			chDescs:        sw.chDescs,
+			onPeerError:    sw.StopPeerForError,
+			reactorsByCh:   sw.reactorsByCh,
+			msgTypeByChID:  sw.msgTypeByChID,
+			metrics:        sw.metrics,
+			mlc:            sw.mlc,
+			isPersistent:   sw.IsPeerPersistent,
+			isPersistentID: sw.isPersistentPeerID,
 		})
 		if err != nil {
 			switch err := err.(type) {
@@ -944,13 +974,14 @@ func (sw *Switch) addOutboundPeerWithConfig(
 	}
 
 	p, err := sw.transport.Dial(*addr, peerConfig{
-		chDescs:       sw.chDescs,
-		onPeerError:   sw.StopPeerForError,
-		isPersistent:  sw.IsPeerPersistent,
-		reactorsByCh:  sw.reactorsByCh,
-		msgTypeByChID: sw.msgTypeByChID,
-		metrics:       sw.metrics,
-		mlc:           sw.mlc,
+		chDescs:        sw.chDescs,
+		onPeerError:    sw.StopPeerForError,
+		isPersistent:   sw.IsPeerPersistent,
+		isPersistentID: sw.isPersistentPeerID,
+		reactorsByCh:   sw.reactorsByCh,
+		msgTypeByChID:  sw.msgTypeByChID,
+		metrics:        sw.metrics,
+		mlc:            sw.mlc,
 	})
 	if err != nil {
 		if e, ok := err.(ErrRejected); ok {

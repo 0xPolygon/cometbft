@@ -149,10 +149,14 @@ func testOutboundPeerConn(
 }
 
 type remotePeer struct {
-	PrivKey    crypto.PrivKey
-	Config     *config.P2PConfig
-	addr       *NetAddress
-	channels   bytes.HexBytes
+	PrivKey  crypto.PrivKey
+	Config   *config.P2PConfig
+	addr     *NetAddress
+	channels bytes.HexBytes
+	// reportAddr overrides what this peer claims its listen address is, so a
+	// test can reproduce a node whose external_address is unset and which
+	// therefore reports something other than the address it was configured at
+	reportAddr string
 	listenAddr string
 	listener   net.Listener
 }
@@ -230,10 +234,14 @@ func (rp *remotePeer) accept() {
 }
 
 func (rp *remotePeer) nodeInfo() NodeInfo {
+	listenAddr := rp.listener.Addr().String()
+	if rp.reportAddr != "" {
+		listenAddr = rp.reportAddr
+	}
 	return DefaultNodeInfo{
 		ProtocolVersion: defaultProtocolVersion,
 		DefaultNodeID:   rp.Addr().ID,
-		ListenAddr:      rp.listener.Addr().String(),
+		ListenAddr:      listenAddr,
 		Network:         "testing",
 		Version:         "1.2.3-rc0-deadbeef",
 		Channels:        rp.channels,

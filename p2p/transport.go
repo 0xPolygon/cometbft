@@ -46,14 +46,17 @@ type peerConfig struct {
 	chDescs     []*conn.ChannelDescriptor
 	onPeerError func(Peer, interface{})
 	outbound    bool
-	// isPersistent allows you to set a function, which, given socket address
-	// (for outbound peers) OR self-reported address (for inbound peers), tells
-	// if the peer is persistent or not.
-	isPersistent  func(*NetAddress) bool
-	reactorsByCh  map[byte]Reactor
-	msgTypeByChID map[byte]proto.Message
-	metrics       *Metrics
-	mlc           *metricsLabelCache
+	// isPersistent allows you to set a function, which, given the socket
+	// address of an outbound peer, tells if the peer is persistent or not.
+	isPersistent func(*NetAddress) bool
+	// isPersistentID is the same question for an inbound peer, asked by node
+	// ID. An inbound peer's address is self-reported and routinely differs
+	// from the configured entry, but its ID is authenticated by the handshake.
+	isPersistentID func(ID) bool
+	reactorsByCh   map[byte]Reactor
+	msgTypeByChID  map[byte]proto.Message
+	metrics        *Metrics
+	mlc            *metricsLabelCache
 }
 
 // Transport emits and connects to Peers. The implementation of Peer is left to
@@ -505,15 +508,12 @@ func (mt *MultiplexTransport) wrapPeer(
 ) Peer {
 
 	persistent := false
-	if cfg.isPersistent != nil {
-		if cfg.outbound {
+	if cfg.outbound {
+		if cfg.isPersistent != nil {
 			persistent = cfg.isPersistent(socketAddr)
-		} else {
-			selfReportedAddr, err := ni.NetAddress()
-			if err == nil {
-				persistent = cfg.isPersistent(selfReportedAddr)
-			}
 		}
+	} else if cfg.isPersistentID != nil {
+		persistent = cfg.isPersistentID(ni.ID())
 	}
 
 	peerConn := newPeerConn(
