@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"regexp"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/cometbft/cometbft/config"
+	"github.com/cometbft/cometbft/crypto"
 	"github.com/cometbft/cometbft/crypto/ed25519"
 	"github.com/cometbft/cometbft/libs/log"
 	cmtsync "github.com/cometbft/cometbft/libs/sync"
@@ -542,6 +544,525 @@ func TestSwitchReconnectsToInboundPersistentPeer(t *testing.T) {
 
 	waitUntilSwitchHasAtLeastNPeers(sw, 1)
 	assert.Equal(t, 1, sw.Peers().Size())
+}
+
+// blackholePeer owns a listening port but never completes a handshake: it
+// counts each connection attempt and closes it, so dials to its address fail
+// fast. Keeping the listener open means the port is never free for another
+// process to claim, and the attempt count lets a test assert the reconnect
+// loop is really dialing instead of waiting out a wall-clock margin.
+type blackholePeer struct {
+	key      crypto.PrivKey
+	ln       net.Listener
+	attempts atomic.Int64
+	handOver chan struct{}
+}
+
+func newBlackholePeer(t *testing.T) *blackholePeer {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	bp := &blackholePeer{
+		key:      ed25519.GenPrivKey(),
+		ln:       ln,
+		handOver: make(chan struct{}),
+	}
+	t.Cleanup(func() { _ = bp.ln.Close() })
+
+	go func() {
+		for {
+			conn, err := bp.ln.Accept()
+			if err != nil {
+				return
+			}
+			_ = conn.Close()
+
+			select {
+			case <-bp.handOver:
+				return
+			default:
+				bp.attempts.Add(1)
+			}
+		}
+	}()
+
+	return bp
+}
+
+func (bp *blackholePeer) addr() *NetAddress {
+	return NewNetAddress(PubKeyToID(bp.key.PubKey()), bp.ln.Addr())
+}
+
+// waitForDials waits until the address has been dialed at least n times.
+func (bp *blackholePeer) waitForDials(t *testing.T, n int64, timeout time.Duration) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if bp.attempts.Load() >= n {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("expected at least %d dial attempts, got %d", n, bp.attempts.Load())
+}
+
+// revive serves real handshakes on the same listener under the same identity,
+// so the peer becomes reachable at its original address without the port ever
+// being released.
+func (bp *blackholePeer) revive() {
+	close(bp.handOver)
+
+	rp := &remotePeer{
+		PrivKey:  bp.key,
+		Config:   cfg,
+		listener: bp.ln,
+		addr:     bp.addr(),
+		channels: []byte{testCh},
+	}
+	go rp.accept()
+}
+
+// testReconnectPolicy collapses the production schedule to the shortest one
+// that still runs every phase, so a test reaches the point where the old code
+// abandoned the address. The two bounded phases allow exactly two dials, so any
+// dial beyond that came from the persistent phase.
+func testReconnectPolicy() reconnectPolicy {
+	return reconnectPolicy{
+		attempts:        1,
+		interval:        time.Millisecond,
+		backOffAttempts: 1,
+		backOffBase:     1,
+		persistentEvery: time.Millisecond,
+	}
+}
+
+const boundedPhaseDials = 2
+
+func TestReconnectToPeerNeverGivesUpOnPersistentPeer(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+
+	sw := MakeSwitch(cfg, 1, initSwitchFunc)
+	require.NoError(t, sw.Start())
+	t.Cleanup(func() {
+		if err := sw.Stop(); err != nil {
+			t.Error(err)
+		}
+	})
+
+	bp := newBlackholePeer(t)
+	addr := bp.addr()
+	require.NoError(t, sw.AddPersistentPeers([]string{addr.String()}))
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		sw.reconnectToPeerWithPolicy(addr, testReconnectPolicy())
+	}()
+
+	// dials beyond what the bounded phases allow can only come from the
+	// persistent phase, which is where the old code gave up instead
+	bp.waitForDials(t, boundedPhaseDials+2, 30*time.Second)
+
+	select {
+	case <-done:
+		t.Fatal("reconnectToPeer abandoned a persistent peer")
+	default:
+	}
+}
+
+func TestReconnectToPeerGivesUpOnNonPersistentPeer(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+
+	sw := MakeSwitch(cfg, 1, initSwitchFunc)
+	require.NoError(t, sw.Start())
+	t.Cleanup(func() {
+		if err := sw.Stop(); err != nil {
+			t.Error(err)
+		}
+	})
+
+	bp := newBlackholePeer(t)
+	addr := bp.addr()
+	require.False(t, sw.IsPeerPersistent(addr))
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		sw.reconnectToPeerWithPolicy(addr, testReconnectPolicy())
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("reconnectToPeer never gave up on a non-persistent peer")
+	}
+	assert.LessOrEqual(t, bp.attempts.Load(), int64(boundedPhaseDials),
+		"a non-persistent peer should not be dialed beyond the bounded phases")
+}
+
+func TestSwitchKeepsDialingPersistentPeerUntilItIsBack(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+
+	sw := MakeSwitch(cfg, 1, initSwitchFunc)
+	require.NoError(t, sw.Start())
+	t.Cleanup(func() {
+		if err := sw.Stop(); err != nil {
+			t.Error(err)
+		}
+	})
+
+	bp := newBlackholePeer(t)
+	addr := bp.addr()
+	require.NoError(t, sw.AddPersistentPeers([]string{addr.String()}))
+
+	// production enters this loop through reconnectToPeerWithPolicy, which holds
+	// the reconnecting guard; without it a failed dial spawns a second,
+	// default-policy reconnect goroutine that also dials addr
+	sw.reconnecting.Set(string(addr.ID), addr)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		sw.keepDialingPersistentPeer(addr, time.Millisecond)
+	}()
+
+	// repeated dial failures must not make the switch abandon the address
+	bp.waitForDials(t, 3, 30*time.Second)
+	select {
+	case <-done:
+		t.Fatal("stopped reconnecting to a persistent peer that was still unreachable")
+	default:
+	}
+
+	bp.revive()
+
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("did not reconnect after the persistent peer became reachable again")
+	}
+	assert.NotNil(t, sw.Peers().Get(addr.ID))
+}
+
+func TestSwitchStopsDialingWhenPeerIsNoLongerPersistent(t *testing.T) {
+	sw := MakeSwitch(cfg, 1, initSwitchFunc)
+	require.NoError(t, sw.Start())
+	t.Cleanup(func() {
+		if err := sw.Stop(); err != nil {
+			t.Error(err)
+		}
+	})
+
+	bp := newBlackholePeer(t)
+	addr := bp.addr()
+	require.NoError(t, sw.AddPersistentPeers([]string{addr.String()}))
+
+	// production enters this loop through reconnectToPeerWithPolicy, which holds
+	// the reconnecting guard; without it a failed dial spawns a second,
+	// default-policy reconnect goroutine that also dials addr
+	sw.reconnecting.Set(string(addr.ID), addr)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		sw.keepDialingPersistentPeer(addr, time.Millisecond)
+	}()
+
+	// de-configure only once the loop is demonstrably iterating, otherwise this
+	// would exercise the entry guard rather than the per-iteration re-check
+	bp.waitForDials(t, 2, 30*time.Second)
+	require.NoError(t, sw.AddPersistentPeers([]string{}))
+
+	select {
+	case <-done:
+	case <-time.After(20 * time.Second):
+		t.Fatal("kept reconnecting to an address that is no longer persistent")
+	}
+}
+
+// An address that was never configured as persistent is still abandoned, so
+// reconnectToPeer keeps its bounded behavior for everything else.
+func TestSwitchDoesNotDialNonPersistentPeerIndefinitely(t *testing.T) {
+	sw := MakeSwitch(cfg, 1, initSwitchFunc)
+	require.NoError(t, sw.Start())
+	t.Cleanup(func() {
+		if err := sw.Stop(); err != nil {
+			t.Error(err)
+		}
+	})
+
+	addr := newBlackholePeer(t).addr()
+	require.False(t, sw.IsPeerPersistent(addr))
+
+	// production enters this loop through reconnectToPeerWithPolicy, which holds
+	// the reconnecting guard; without it a failed dial spawns a second,
+	// default-policy reconnect goroutine that also dials addr
+	sw.reconnecting.Set(string(addr.ID), addr)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		sw.keepDialingPersistentPeer(addr, time.Hour)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("kept reconnecting to an address that was never persistent")
+	}
+}
+
+func TestSwitchStopsDialingPersistentPeerOnShutdown(t *testing.T) {
+	sw := MakeSwitch(cfg, 1, initSwitchFunc)
+	require.NoError(t, sw.Start())
+
+	addr := newBlackholePeer(t).addr()
+	require.NoError(t, sw.AddPersistentPeers([]string{addr.String()}))
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		// an interval far longer than the test: only shutdown can end this loop
+		sw.keepDialingPersistentPeer(addr, time.Hour)
+	}()
+
+	require.NoError(t, sw.Stop())
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("reconnect loop outlived the switch")
+	}
+}
+
+func TestSwitchDialPeersAsyncStopsOnShutdown(t *testing.T) {
+	sw := MakeSwitch(cfg, 1, initSwitchFunc)
+	require.NoError(t, sw.Start())
+
+	bp := newBlackholePeer(t)
+	require.NoError(t, sw.Stop())
+
+	// every dial goroutine sleeps before dialing, so a stopped switch must
+	// abandon the dial rather than attempt it
+	sw.dialPeersAsync([]*NetAddress{bp.addr()})
+	time.Sleep(dialRandomizerIntervalMilliseconds*time.Millisecond + time.Second)
+
+	assert.Zero(t, bp.attempts.Load(), "a stopped switch should not dial")
+}
+
+func TestSwitchAddPersistentPeers(t *testing.T) {
+	sw := MakeSwitch(cfg, 1, initSwitchFunc)
+	require.NoError(t, sw.Start())
+	t.Cleanup(func() {
+		if err := sw.Stop(); err != nil {
+			t.Error(err)
+		}
+	})
+	addr := newBlackholePeer(t).addr()
+
+	// cases run in order against the same switch: the set is replaced, not
+	// extended, so clearing is only meaningful after something was added
+	testCases := []struct {
+		name        string
+		peers       []string
+		expectError bool
+		persistent  bool
+	}{
+		{name: "valid address", peers: []string{addr.String()}, persistent: true},
+		{name: "empty list clears the set", peers: []string{}},
+		{name: "missing id", peers: []string{addr.DialString()}, expectError: true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			before := sw.IsPeerPersistent(addr)
+
+			err := sw.AddPersistentPeers(tc.peers)
+			if tc.expectError {
+				require.Error(t, err)
+				assert.Equal(t, before, sw.IsPeerPersistent(addr),
+					"a rejected input should leave the previous set untouched")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.persistent, sw.IsPeerPersistent(addr))
+		})
+	}
+}
+
+func TestSwitchAddUnconditionalPeerIDs(t *testing.T) {
+	sw := MakeSwitch(cfg, 1, initSwitchFunc)
+	require.NoError(t, sw.Start())
+	t.Cleanup(func() {
+		if err := sw.Stop(); err != nil {
+			t.Error(err)
+		}
+	})
+
+	id := string(newBlackholePeer(t).addr().ID)
+	require.False(t, sw.IsPeerUnconditional(ID(id)))
+
+	require.NoError(t, sw.AddUnconditionalPeerIDs([]string{id}))
+	assert.True(t, sw.IsPeerUnconditional(ID(id)))
+
+	other := string(newBlackholePeer(t).addr().ID)
+	require.Error(t, sw.AddUnconditionalPeerIDs([]string{other, "nonsense"}))
+	assert.False(t, sw.IsPeerUnconditional(ID(other)),
+		"a rejected batch should not be applied partially")
+	assert.True(t, sw.IsPeerUnconditional(ID(id)), "earlier ids should survive")
+}
+
+// unsafe_dial_peers mutates the configured peer sets while the accept and pex
+// paths read them. An unguarded map here is a fatal throw, not a recoverable
+// panic, so this has to be race-clean.
+func TestSwitchConfiguredPeerSetsAreRaceFree(t *testing.T) {
+	sw := MakeSwitch(cfg, 1, initSwitchFunc)
+	require.NoError(t, sw.Start())
+	t.Cleanup(func() {
+		if err := sw.Stop(); err != nil {
+			t.Error(err)
+		}
+	})
+
+	addr := newBlackholePeer(t).addr()
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+
+	// writers: the unsafe_dial_peers RPC path
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_ = sw.AddUnconditionalPeerIDs([]string{string(PubKeyToID(ed25519.GenPrivKey().PubKey()))})
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_ = sw.AddPersistentPeers([]string{addr.String()})
+		}
+	}()
+
+	// readers: NumPeers (pex ensurePeers), the accept path, and reconnect
+	wg.Add(3)
+	for range 3 {
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				sw.NumPeers()
+				sw.IsPeerUnconditional(addr.ID)
+				sw.IsPeerPersistent(addr)
+			}
+		}()
+	}
+
+	time.Sleep(250 * time.Millisecond)
+	close(stop)
+	wg.Wait()
+}
+
+func TestSwitchPersistentRedialInterval(t *testing.T) {
+	testCases := []struct {
+		name     string
+		maxDial  time.Duration
+		expected time.Duration
+	}{
+		{name: "unset falls back to the default", maxDial: 0, expected: reconnectPersistentInterval},
+		{name: "longer than the default is ignored", maxDial: time.Hour, expected: reconnectPersistentInterval},
+		{name: "shorter than the default caps the pause", maxDial: time.Minute, expected: time.Minute},
+		{name: "below the floor is clamped", maxDial: time.Millisecond, expected: reconnectInterval},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			conf := config.DefaultP2PConfig()
+			conf.PersistentPeersMaxDialPeriod = tc.maxDial
+			sw := MakeSwitch(conf, 1, initSwitchFunc)
+
+			assert.Equal(t, tc.expected, sw.persistentRedialInterval())
+			assert.Equal(t, tc.expected, sw.defaultReconnectPolicy().persistentEvery)
+		})
+	}
+}
+
+func TestIsTerminalDialErr(t *testing.T) {
+	assert.False(t, isTerminalDialErr(nil))
+	assert.False(t, isTerminalDialErr(errors.New("connection refused")))
+	assert.False(t, isTerminalDialErr(ErrCurrentlyDialingOrExistingAddress{}))
+
+	self := ErrRejected{isSelf: true}
+	assert.True(t, isTerminalDialErr(self), "our own address can never be dialed")
+
+	// an unexpected key may just be a peer mid-upgrade, so it must stay retryable
+	assert.False(t, isTerminalDialErr(ErrRejected{isAuthFailure: true}))
+}
+
+func TestSwitchRandomSleepReportsShutdown(t *testing.T) {
+	sw := MakeSwitch(cfg, 1, initSwitchFunc)
+	require.NoError(t, sw.Start())
+
+	assert.True(t, sw.randomSleep(0), "a sleep that ran to completion should report true")
+
+	slept := make(chan bool, 1)
+	go func() { slept <- sw.randomSleep(time.Hour) }()
+
+	// the interval has to be honored, not just the jitter
+	select {
+	case <-slept:
+		t.Fatal("randomSleep returned before its interval elapsed")
+	case <-time.After(dialRandomizerIntervalMilliseconds*time.Millisecond + time.Second):
+	}
+
+	require.NoError(t, sw.Stop())
+
+	select {
+	case completed := <-slept:
+		assert.False(t, completed, "a sleep cut short by shutdown should report false")
+	case <-time.After(5 * time.Second):
+		t.Fatal("randomSleep ignored switch shutdown")
+	}
+}
+
+func TestSwitchDialForReconnect(t *testing.T) {
+	sw := MakeSwitch(cfg, 1, initSwitchFunc)
+	require.NoError(t, sw.Start())
+
+	downAddr := newBlackholePeer(t).addr()
+	assert.False(t, sw.dialForReconnect(downAddr, 0), "a failed dial should keep the loop going")
+
+	rp := &remotePeer{PrivKey: ed25519.GenPrivKey(), Config: cfg}
+	rp.Start()
+	defer rp.Stop()
+
+	assert.True(t, sw.dialForReconnect(rp.Addr(), 0), "a successful dial should end the loop")
+	assert.True(t, sw.dialForReconnect(rp.Addr(), 0), "an already-connected peer should end the loop")
+
+	require.NoError(t, sw.Stop())
+	assert.True(t, sw.dialForReconnect(downAddr, 0), "a stopped switch should end the loop")
 }
 
 func TestSwitchDialPeersAsync(t *testing.T) {
