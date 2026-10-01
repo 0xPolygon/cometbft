@@ -13,6 +13,7 @@ import (
 	"github.com/cometbft/cometbft/crypto"
 	"github.com/cometbft/cometbft/libs/protoio"
 	"github.com/cometbft/cometbft/p2p/conn"
+	"github.com/cometbft/cometbft/p2p/observation"
 	tmp2p "github.com/cometbft/cometbft/proto/tendermint/p2p"
 )
 
@@ -43,6 +44,8 @@ type accept struct {
 // events.
 // TODO(xla): Refactor out with more static Reactor setup and PeerBehaviour.
 type peerConfig struct {
+	observer observation.Observer
+
 	chDescs     []*conn.ChannelDescriptor
 	onPeerError func(Peer, interface{})
 	outbound    bool
@@ -529,6 +532,7 @@ func (mt *MultiplexTransport) wrapPeer(
 		cfg.onPeerError,
 		cfg.mlc,
 		PeerMetrics(cfg.metrics),
+		func(p *peer) { p.observer = cfg.observer },
 	)
 
 	return p

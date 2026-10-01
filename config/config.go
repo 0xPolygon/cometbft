@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/cometbft/cometbft/p2p/observation"
 	"github.com/cometbft/cometbft/version"
 )
 
@@ -548,6 +549,10 @@ func (cfg RPCConfig) IsTLSEnabled() bool {
 
 // P2PConfig defines the configuration options for the CometBFT peer-to-peer networking layer
 type P2PConfig struct {
+	// PeerObserver is an optional application-owned observer installed before node
+	// construction. It is never populated from operator configuration files.
+	PeerObserver observation.Observer `mapstructure:"-" json:"-" toml:"-"`
+
 	RootDir string `mapstructure:"home"`
 
 	// Address to listen for incoming connections

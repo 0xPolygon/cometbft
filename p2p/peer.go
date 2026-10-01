@@ -11,6 +11,7 @@ import (
 	"github.com/cometbft/cometbft/libs/cmap"
 	"github.com/cometbft/cometbft/libs/log"
 	"github.com/cometbft/cometbft/libs/service"
+	"github.com/cometbft/cometbft/p2p/observation"
 
 	cmtconn "github.com/cometbft/cometbft/p2p/conn"
 )
@@ -106,6 +107,8 @@ func (pc peerConn) RemoteIP() net.IP {
 //
 // Before using a peer, you will need to perform a handshake on connection.
 type peer struct {
+	observer observation.Observer
+
 	service.BaseService
 
 	// raw peerConn and the multiplex connection
@@ -273,6 +276,7 @@ func (p *peer) send(chID byte, msg proto.Message, sendFunc func(byte, []byte) bo
 	} else if !p.hasChannel(chID) {
 		return false
 	}
+	original := msg
 	metricLabelValue := p.mlc.ValueToMetricLabel(msg)
 	if w, ok := msg.(Wrapper); ok {
 		msg = w.Wrap()
@@ -284,6 +288,7 @@ func (p *peer) send(chID byte, msg proto.Message, sendFunc func(byte, []byte) bo
 	}
 	res := sendFunc(chID, msgBytes)
 	if res {
+		p.observe(observation.Event{Kind: observation.Queued, Channel: chID, Bytes: len(msgBytes), Message: original})
 		labels := []string{
 			"peer_id", string(p.ID()),
 			"chID", fmt.Sprintf("%#x", chID),
@@ -408,6 +413,7 @@ func createMConnection(
 		msg := proto.Clone(mt)
 		err := proto.Unmarshal(msgBytes, msg)
 		if err != nil {
+			p.observe(observation.Event{Kind: observation.InvalidEncoding, Channel: chID, Bytes: len(msgBytes)})
 			panic(fmt.Errorf("unmarshaling message: %s into type: %s", err, reflect.TypeOf(mt)))
 		}
 		labels := []string{
@@ -417,11 +423,13 @@ func createMConnection(
 		if w, ok := msg.(Unwrapper); ok {
 			msg, err = w.Unwrap()
 			if err != nil {
+				p.observe(observation.Event{Kind: observation.InvalidEncoding, Channel: chID, Bytes: len(msgBytes)})
 				panic(fmt.Errorf("unwrapping message: %s", err))
 			}
 		}
 		p.metrics.PeerReceiveBytesTotal.With(labels...).Add(float64(len(msgBytes)))
 		p.metrics.MessageReceiveBytesTotal.With("message_type", p.mlc.ValueToMetricLabel(msg)).Add(float64(len(msgBytes)))
+		p.observe(observation.Event{Kind: observation.Received, Channel: chID, Bytes: len(msgBytes), Message: msg})
 		reactor.Receive(Envelope{
 			ChannelID: chID,
 			Src:       p,

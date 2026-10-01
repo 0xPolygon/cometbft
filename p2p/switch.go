@@ -844,6 +844,7 @@ func (sw *Switch) IsPeerPersistent(na *NetAddress) bool {
 func (sw *Switch) acceptRoutine() {
 	for {
 		p, err := sw.transport.Accept(peerConfig{
+			observer:      sw.config.PeerObserver,
 			chDescs:       sw.chDescs,
 			onPeerError:   sw.StopPeerForError,
 			reactorsByCh:  sw.reactorsByCh,
@@ -949,6 +950,7 @@ func (sw *Switch) addOutboundPeerWithConfig(
 	}
 
 	p, err := sw.transport.Dial(*addr, peerConfig{
+		observer:      sw.config.PeerObserver,
 		chDescs:       sw.chDescs,
 		onPeerError:   sw.StopPeerForError,
 		isPersistent:  sw.isPersistentPeerID,

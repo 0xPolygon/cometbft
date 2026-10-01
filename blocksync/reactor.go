@@ -252,6 +252,7 @@ func (bcR *Reactor) respondToPeer(msg *bcproto.BlockRequest, src p2p.Peer) (queu
 func (bcR *Reactor) Receive(e p2p.Envelope) { //nolint: dupl // recreated in a test
 	if err := ValidateMsg(e.Message); err != nil {
 		bcR.Logger.Error("Peer sent us invalid msg", "peer", e.Src, "msg", e.Message, "err", err)
+		bcR.Switch.ObserveInvalid(e.Src, e.ChannelID)
 		bcR.Switch.StopPeerForError(e.Src, err)
 		return
 	}
@@ -265,6 +266,7 @@ func (bcR *Reactor) Receive(e p2p.Envelope) { //nolint: dupl // recreated in a t
 		bi, err := types.BlockFromProto(msg.Block)
 		if err != nil {
 			bcR.Logger.Error("Peer sent us invalid block", "peer", e.Src, "msg", e.Message, "err", err)
+			bcR.Switch.ObserveInvalid(e.Src, e.ChannelID)
 			bcR.Switch.StopPeerForError(e.Src, err)
 			return
 		}
@@ -276,6 +278,7 @@ func (bcR *Reactor) Receive(e p2p.Envelope) { //nolint: dupl // recreated in a t
 				bcR.Logger.Error("failed to convert extended commit from proto",
 					"peer", e.Src,
 					"err", err)
+				bcR.Switch.ObserveInvalid(e.Src, e.ChannelID)
 				bcR.Switch.StopPeerForError(e.Src, err)
 				return
 			}
