@@ -475,6 +475,38 @@ max_snapshot_chunks = {{ .StateSync.MaxSnapshotChunks }}
 #   1) "v0" - the default block sync implementation
 version = "{{ .BlockSync.Version }}"
 
+# Node-wide ceiling, in bytes per second, on block-sync response bytes served
+# to peers that are not configured as persistent. This is an aggregate limit,
+# not a per-peer one, so it holds regardless of how many peers or subnets the
+# requests arrive from. Set to 0 to disable.
+serving_rate = {{ .BlockSync.ServingRate }}
+
+# Bytes that may be served above serving_rate in a burst, so a node that has
+# been idle can answer a catch-up immediately. 0 means two seconds of
+# serving_rate.
+serving_burst = {{ .BlockSync.ServingBurst }}
+
+# Caps any single remote network prefix (/24 for IPv4, /64 for IPv6) at this
+# many bytes per second, so one address block cannot consume the whole
+# node-wide budget while other peers starve. Set to 0 to disable.
+serving_subnet_rate = {{ .BlockSync.ServingSubnetRate }}
+
+# Average-rate-plus-burst volume quota, in bytes, for one remote address.
+# Tokens refill at peer_byte_quota / peer_byte_quota_period and the bucket can
+# burst to one full quota, so a period-length interval may contain up to twice
+# this value while the long-run average converges to one quota per period.
+# Set to 0 to disable.
+peer_byte_quota = {{ .BlockSync.PeerByteQuota }}
+
+# Refill period used to derive peer_byte_quota's token rate.
+peer_byte_quota_period = "{{ .BlockSync.PeerByteQuotaPeriod }}"
+
+# Comma-separated node IDs exempt from serving_subnet_rate and
+# peer_byte_quota, for known partners running legitimate bulk syncs that need
+# an allowance without being made persistent peers. Exempt peers are still
+# counted against serving_rate.
+exempt_peer_ids = "{{ .BlockSync.ExemptPeerIDs }}"
+
 #######################################################
 ###         Consensus Configuration Options         ###
 #######################################################

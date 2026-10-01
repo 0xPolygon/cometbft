@@ -151,6 +151,41 @@ func TestBlockSyncConfigValidateBasic(t *testing.T) {
 	assert.Error(t, cfg.ValidateBasic())
 }
 
+func TestBlockSyncConfigValidateServing(t *testing.T) {
+	testCases := map[string]struct {
+		modify    func(*config.BlockSyncConfig)
+		expectErr bool
+	}{
+		"defaults are valid": {func(*config.BlockSyncConfig) {}, false},
+		"all layers disabled": {func(c *config.BlockSyncConfig) {
+			c.ServingRate, c.ServingBurst, c.ServingSubnetRate, c.PeerByteQuota = 0, 0, 0, 0
+		}, false},
+		"negative rate":        {func(c *config.BlockSyncConfig) { c.ServingRate = -1 }, true},
+		"negative burst":       {func(c *config.BlockSyncConfig) { c.ServingBurst = -1 }, true},
+		"negative subnet rate": {func(c *config.BlockSyncConfig) { c.ServingSubnetRate = -1 }, true},
+		"negative quota":       {func(c *config.BlockSyncConfig) { c.PeerByteQuota = -1 }, true},
+		"negative period":      {func(c *config.BlockSyncConfig) { c.PeerByteQuotaPeriod = -time.Second }, true},
+		// A layer too small to admit a single response refuses every response
+		// forever, silently. Reject it rather than ship an outage.
+		"rate below one response":        {func(c *config.BlockSyncConfig) { c.ServingRate = 1024 }, true},
+		"burst below one response":       {func(c *config.BlockSyncConfig) { c.ServingBurst = 1024 }, true},
+		"subnet rate below one response": {func(c *config.BlockSyncConfig) { c.ServingSubnetRate = 1024 }, true},
+		"quota below one response":       {func(c *config.BlockSyncConfig) { c.PeerByteQuota = 1024 }, true},
+		"quota without a period":         {func(c *config.BlockSyncConfig) { c.PeerByteQuotaPeriod = 0 }, true},
+	}
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			cfg := config.DefaultBlockSyncConfig()
+			tc.modify(cfg)
+			if tc.expectErr {
+				assert.Error(t, cfg.ValidateBasic())
+			} else {
+				assert.NoError(t, cfg.ValidateBasic())
+			}
+		})
+	}
+}
+
 func TestConsensusConfig_ValidateBasic(t *testing.T) {
 	//nolint: lll
 	testcases := map[string]struct {

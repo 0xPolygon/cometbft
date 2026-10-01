@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"sync"
 	"time"
 
 	"github.com/cosmos/gogoproto/proto"
@@ -56,9 +57,6 @@ type peerConn struct {
 	conn       net.Conn // source connection
 
 	socketAddr *NetAddress
-
-	// cached RemoteIP()
-	ip net.IP
 }
 
 func newPeerConn(
@@ -81,27 +79,6 @@ func (pc peerConn) ID() ID {
 	return PubKeyToID(pc.conn.(*cmtconn.SecretConnection).RemotePubKey())
 }
 
-// Return the IP from the connection RemoteAddr
-func (pc peerConn) RemoteIP() net.IP {
-	if pc.ip != nil {
-		return pc.ip
-	}
-
-	host, _, err := net.SplitHostPort(pc.conn.RemoteAddr().String())
-	if err != nil {
-		panic(err)
-	}
-
-	ips, err := net.LookupIP(host)
-	if err != nil {
-		panic(err)
-	}
-
-	pc.ip = ips[0]
-
-	return pc.ip
-}
-
 // peer implements Peer.
 //
 // Before using a peer, you will need to perform a handshake on connection.
@@ -111,6 +88,30 @@ type peer struct {
 	// raw peerConn and the multiplex connection
 	peerConn
 	mconn *cmtconn.MConnection
+
+	// cached RemoteIP(), resolved at most once. RemoteIP is called
+	// concurrently in practice (this reactor's own receive goroutine, the
+	// RPC net_info handler, PeerSet.hasIP), so the cache populate is
+	// guarded by ipOnce rather than a plain nil-check on peerConn — a bare
+	// check-then-write there would be a real data race the first time two
+	// callers race to resolve it, not just a theoretical one. Lives here
+	// rather than on peerConn because peerConn is constructed and passed
+	// by value (newPeerConn/newPeer) before being embedded — a sync.Once
+	// there would make every one of those pre-use copies a copylocks
+	// violation. peer itself is never copied by value; only *peer is ever
+	// used once constructed.
+	//
+	// sync.Once marks itself done even when f panics (see sync.Once.Do's
+	// doc), so a panic in RemoteIP's resolve closure permanently poisons
+	// ip to nil rather than retrying — every later call on that peer
+	// silently returns nil instead of re-panicking. Not attacker-reachable
+	// (RemoteAddr().String() is kernel-reported and net.LookupIP
+	// short-circuits literal IPs without a DNS query), and a nil result
+	// buckets harmlessly under ipRateLimitKey's shared "<nil>" key rather
+	// than bypassing the rate limit — but worth knowing before assuming a
+	// broken RemoteAddr() would keep erroring loudly.
+	ipOnce sync.Once
+	ip     net.IP
 
 	// peer's node info and the channel it knows about
 	// channels = nodeInfo.Channels
@@ -351,12 +352,38 @@ func (p *peer) RemoteAddr() net.Addr {
 	return p.conn.RemoteAddr()
 }
 
+// RemoteIP returns the IP from the connection's RemoteAddr, resolved once
+// and cached (see the ipOnce field's doc comment for why this lives here,
+// synchronized, rather than as a plain nil-check on peerConn).
+func (p *peer) RemoteIP() net.IP {
+	p.ipOnce.Do(func() {
+		host, _, err := net.SplitHostPort(p.conn.RemoteAddr().String())
+		if err != nil {
+			panic(err)
+		}
+
+		ips, err := net.LookupIP(host)
+		if err != nil {
+			panic(err)
+		}
+
+		p.ip = ips[0]
+	})
+
+	return p.ip
+}
+
 // CanSend returns true if the send queue is not full, false otherwise.
 func (p *peer) CanSend(chID byte) bool {
 	if !p.IsRunning() {
 		return false
 	}
 	return p.mconn.CanSend(chID)
+}
+
+// SendQueueFull reports whether the channel has reached its send queue capacity.
+func (p *peer) SendQueueFull(chID byte) bool {
+	return p.mconn.SendQueueFull(chID)
 }
 
 //---------------------------------------------------

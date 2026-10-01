@@ -6,6 +6,9 @@ import (
 	"sync"
 	"time"
 
+	kitmetrics "github.com/go-kit/kit/metrics"
+	"github.com/go-kit/kit/metrics/discard"
+
 	"github.com/cometbft/cometbft/crypto"
 	"github.com/cometbft/cometbft/libs/log"
 	"github.com/cometbft/cometbft/p2p"
@@ -53,12 +56,14 @@ type Reactor struct {
 	// immutable
 	initialState sm.State
 
-	blockExec     *sm.BlockExecutor
-	store         sm.BlockStore
-	pool          *BlockPool
-	blockSync     bool
-	localAddr     crypto.Address
-	poolRoutineWg sync.WaitGroup
+	blockExec      *sm.BlockExecutor
+	store          *store.BlockStore
+	pool           *BlockPool
+	blockSync      bool
+	localAddr      crypto.Address
+	poolRoutineWg  sync.WaitGroup
+	sweepRoutineWg sync.WaitGroup
+	sweepStopCh    chan struct{}
 
 	requestsCh <-chan BlockRequest
 	errorsCh   <-chan peerError
@@ -66,18 +71,26 @@ type Reactor struct {
 	switchToConsensusMs int
 
 	metrics *Metrics
+
+	sendQueueFullDrops kitmetrics.Counter
+
+	reqLimiter *requestLimiter[p2p.ID]
+	ipLimiter  *requestLimiter[string]
+
+	servingBudget *servingBudget
 }
 
 // NewReactor returns new reactor instance.
 func NewReactor(state sm.State, blockExec *sm.BlockExecutor, store *store.BlockStore,
-	blockSync bool, metrics *Metrics, offlineStateSyncHeight int64,
+	blockSync bool, metrics *Metrics, offlineStateSyncHeight int64, opts ...ReactorOption,
 ) *Reactor {
-	return NewReactorWithAddr(state, blockExec, store, blockSync, nil, metrics, offlineStateSyncHeight)
+	return NewReactorWithAddr(state, blockExec, store, blockSync, nil, metrics, offlineStateSyncHeight, opts...)
 }
 
 // Function added to keep existing API.
 func NewReactorWithAddr(state sm.State, blockExec *sm.BlockExecutor, store *store.BlockStore,
 	blockSync bool, localAddr crypto.Address, metrics *Metrics, offlineStateSyncHeight int64,
+	opts ...ReactorOption,
 ) *Reactor {
 
 	storeHeight := store.Height()
@@ -109,15 +122,24 @@ func NewReactorWithAddr(state sm.State, blockExec *sm.BlockExecutor, store *stor
 	pool := NewBlockPool(startHeight, requestsCh, errorsCh)
 
 	bcR := &Reactor{
-		initialState: state,
-		blockExec:    blockExec,
-		store:        store,
-		pool:         pool,
-		blockSync:    blockSync,
-		localAddr:    localAddr,
-		requestsCh:   requestsCh,
-		errorsCh:     errorsCh,
-		metrics:      metrics,
+		initialState:  state,
+		blockExec:     blockExec,
+		store:         store,
+		pool:          pool,
+		blockSync:     blockSync,
+		localAddr:     localAddr,
+		requestsCh:    requestsCh,
+		errorsCh:      errorsCh,
+		metrics:       metrics,
+		reqLimiter:    newPeerBlockRequestLimiter(),
+		ipLimiter:     newIPBlockRequestLimiter(),
+		sweepStopCh:   make(chan struct{}),
+		servingBudget: newServingBudget(DefaultServingConfig()),
+
+		sendQueueFullDrops: discard.NewCounter(),
+	}
+	for _, opt := range opts {
+		opt(bcR)
 	}
 	bcR.BaseReactor = *p2p.NewBaseReactor("Reactor", bcR)
 	return bcR
@@ -142,6 +164,15 @@ func (bcR *Reactor) OnStart() error {
 			bcR.poolRoutine(false)
 		}()
 	}
+
+	// Started last: BaseService.Start doesn't call OnStop when OnStart
+	// returns an error, so any goroutine started before a fallible step
+	// above would leak on that error path with sweepStopCh never closed.
+	bcR.sweepRoutineWg.Add(1)
+	go func() {
+		defer bcR.sweepRoutineWg.Done()
+		bcR.limiterSweepRoutine()
+	}()
 	return nil
 }
 
@@ -171,6 +202,8 @@ func (bcR *Reactor) OnStop() {
 		}
 		bcR.poolRoutineWg.Wait()
 	}
+	close(bcR.sweepStopCh)
+	bcR.sweepRoutineWg.Wait()
 }
 
 // GetChannels implements Reactor
@@ -202,16 +235,39 @@ func (bcR *Reactor) AddPeer(peer p2p.Peer) {
 	// bcStatusResponseMessage from the peer and call pool.SetPeerRange
 }
 
-// RemovePeer implements Reactor by removing peer from the pool.
+// RemovePeer implements Reactor by removing peer from the pool. It
+// deliberately doesn't touch reqLimiter/ipLimiter — see requestLimiter's
+// doc comment for why that cleanup is time-based, not disconnect-based.
 func (bcR *Reactor) RemovePeer(peer p2p.Peer, _ interface{}) {
 	bcR.pool.RemovePeer(peer.ID())
 }
 
-// respondToPeer loads a block and sends it to the requesting peer,
-// if we have it. Otherwise, we'll respond saying we don't have it.
+// respondToPeer checks request limits, queue space and byte budgets before loading a block.
+// Persistent peers bypass request and byte limits, but still need queue space.
 func (bcR *Reactor) respondToPeer(msg *bcproto.BlockRequest, src p2p.Peer) (queued bool) {
-	block := bcR.store.LoadBlock(msg.Height)
-	if block == nil {
+	exempt := exemptFromRateLimit(src, bcR.store.Height())
+	if !allowBlockRequest(bcR, src, msg) {
+		return false
+	}
+	if blockQueueFull(src) {
+		bcR.sendQueueFullDrops.Add(1)
+		return false
+	}
+
+	// Admission precedes the store read and marshal below on purpose: a
+	// response we cannot afford must not first cost us the work of preparing
+	// it. release is deferred so every return path gives back what it charged.
+	res, admitted := bcR.reserveServing(src, exempt)
+	if !admitted {
+		return false
+	}
+	defer res.release()
+
+	// Load the block already in proto form to skip the BlockFromProto+ToProto
+	// round-trip respondToPeer used to pay on every call (cherry-picked from
+	// upstream cometbft#5761).
+	bl := bcR.store.LoadBlockProto(msg.Height)
+	if bl == nil {
 		bcR.Logger.Info("Peer asking for a block we don't have", "src", src, "height", msg.Height)
 		return src.TrySend(p2p.Envelope{
 			ChannelID: BlocksyncChannel,
@@ -219,33 +275,33 @@ func (bcR *Reactor) respondToPeer(msg *bcproto.BlockRequest, src p2p.Peer) (queu
 		})
 	}
 
-	state, err := bcR.blockExec.Store().Load()
-	if err != nil {
-		bcR.Logger.Error("loading state", "err", err)
-		return false
-	}
-	var extCommit *types.ExtendedCommit
-	if state.ConsensusParams.ABCI.VoteExtensionsEnabled(msg.Height) {
-		extCommit = bcR.store.LoadBlockExtendedCommit(msg.Height)
-		if extCommit == nil {
-			bcR.Logger.Error("found block in store with no extended commit", "block", block)
-			return false
-		}
-	}
-
-	bl, err := block.ToProto()
-	if err != nil {
-		bcR.Logger.Error("could not convert msg to protobuf", "err", err)
+	extCommit, ok := bcR.loadExtCommit(msg.Height)
+	if !ok {
 		return false
 	}
 
-	return src.TrySend(p2p.Envelope{
+	// Charged before the send, not after: a budget cannot un-send bytes, so
+	// settle has to be able to refuse a response whose real size exceeds what
+	// the admitted estimate covered. A queue-full TrySend is the one case
+	// where the bytes are genuinely not spent, which the deferred release
+	// covers.
+	served := float64(bl.Size() + extCommit.Size() + blockResponseOverheadBytes)
+	if !res.settle(served) {
+		bcR.metrics.ServingBudgetDrops.Add(1)
+		return false
+	}
+	if !src.TrySend(p2p.Envelope{
 		ChannelID: BlocksyncChannel,
 		Message: &bcproto.BlockResponse{
 			Block:     bl,
-			ExtCommit: extCommit.ToProto(),
+			ExtCommit: extCommit,
 		},
-	})
+	}) {
+		return false
+	}
+	res.commit()
+	bcR.metrics.BlockBytesServed.Add(served)
+	return true
 }
 
 // Receive implements Reactor by handling 4 types of messages (look below).
