@@ -685,6 +685,12 @@ func (cfg *P2PConfig) ValidateBasic() error {
 	if cfg.RecvRate < 0 {
 		return errors.New("recv_rate can't be negative")
 	}
+	if cfg.HandshakeTimeout <= 0 {
+		return errors.New("handshake_timeout must be positive")
+	}
+	if cfg.DialTimeout <= 0 {
+		return errors.New("dial_timeout must be positive")
+	}
 	return nil
 }
 

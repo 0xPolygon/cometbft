@@ -110,6 +110,16 @@ func ConnDuplicateIPFilter() ConnFilterFunc {
 // MultiplexTransport.
 type MultiplexTransportOption func(*MultiplexTransport)
 
+// MultiplexTransportDialTimeout sets the timeout for establishing a TCP connection.
+func MultiplexTransportDialTimeout(timeout time.Duration) MultiplexTransportOption {
+	return func(mt *MultiplexTransport) { mt.dialTimeout = timeout }
+}
+
+// MultiplexTransportHandshakeTimeout sets the timeout for each handshake phase.
+func MultiplexTransportHandshakeTimeout(timeout time.Duration) MultiplexTransportOption {
+	return func(mt *MultiplexTransport) { mt.handshakeTimeout = timeout }
+}
+
 // MultiplexTransportConnFilters sets the filters for rejection new connections.
 func MultiplexTransportConnFilters(
 	filters ...ConnFilterFunc,
