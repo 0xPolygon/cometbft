@@ -1,4 +1,4 @@
-# Native peer observation hooks
+# Native peer observation and connection policy hooks
 
 `Observer` is an optional application-owned callback installed through
 `Config.P2P.PeerObserver` **before node creation**. The field is ignored by
@@ -25,14 +25,34 @@ or retain it, perform I/O, wait on external queues, call networking recursively 
 spawn work per event. The caller may invoke Observe concurrently. Set the observer
 once; replacing the interface while networking runs is unsupported.
 
-This package has no score, admission decision, per-peer map, jail, worker or metric
-registration. Heimdall owns bounded policy state and telemetry. Existing disconnects,
-blocksync bans, statesync exclusions, rate limits and queue behavior are unchanged.
-Asynchronous commit/snapshot validation needs supplier provenance before extending
-this correctness interface. Consensus traffic is still delivered unchanged.
+An optional `ConnectionPolicy` is installed through `Config.P2P.PeerPolicy` before
+startup with the same bounded, concurrent, local-call contract. It answers
+`AllowPeer(authenticatedNodeID)`. It has no serialized configuration and defaults
+to nil. The application owns the score, eligibility and expiry.
+
+The switch checks policy after authentication and before peer/reactor admission in
+both directions. A peer checks it before sending and after transport observations.
+Denied received messages do not reach their reactor. Denial closes the connection
+once and uses the existing connection-error/removal path. A successful local enqueue
+still returns success even if its observation then causes disconnection; it is not
+a promise of delivery. Existing reactor invalidity reports still use their native
+disconnect path, after updating evidence.
+
+Persistent and unconditional peers also pass the policy gate. Persistent redial
+and backoff remain native; a policy rejection is non-terminal for redial. Admission
+can reopen when application evidence expires. Checks do not themselves create
+misconduct evidence, and this package adds no score ledger, jail timer or worker.
+Existing blocksync bans, statesync exclusions and rate limits retain their own
+semantics and may independently exclude a peer.
+
+This is a connection gate, not a pre-decode or pre-storage serving budget. It cannot
+recover bandwidth or work already consumed. Asynchronous commit/snapshot validation
+still needs supplier provenance before extending correctness evidence. Consensus
+validation is unchanged; disconnecting a peer stops all its channels.
 
 Tests exercise real native inbound/outbound transports, decoded traffic,
 malformed envelopes, failed queueing, original message types, reactor failures and
-neutral local snapshot policy rejection. The interface itself does not promise
+neutral local snapshot policy rejection, admission in both directions, active-peer
+removal, policy expiry and persistent-peer send gating. The interface itself does not promise
 nonblocking behavior for an arbitrary application implementation; that is a caller
 contract and must be benchmarked and tested by the application.
