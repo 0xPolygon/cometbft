@@ -129,7 +129,6 @@ func NewSwitch(
 	transport Transport,
 	options ...SwitchOption,
 ) *Switch {
-
 	sw := &Switch{
 		config:               cfg,
 		reactors:             make(map[string]Reactor),
@@ -845,6 +844,7 @@ func (sw *Switch) acceptRoutine() {
 	for {
 		p, err := sw.transport.Accept(peerConfig{
 			observer:      sw.config.PeerObserver,
+			policy:        sw.config.PeerPolicy,
 			chDescs:       sw.chDescs,
 			onPeerError:   sw.StopPeerForError,
 			reactorsByCh:  sw.reactorsByCh,
@@ -951,6 +951,7 @@ func (sw *Switch) addOutboundPeerWithConfig(
 
 	p, err := sw.transport.Dial(*addr, peerConfig{
 		observer:      sw.config.PeerObserver,
+		policy:        sw.config.PeerPolicy,
 		chDescs:       sw.chDescs,
 		onPeerError:   sw.StopPeerForError,
 		isPersistent:  sw.isPersistentPeerID,
@@ -992,6 +993,10 @@ func (sw *Switch) addOutboundPeerWithConfig(
 }
 
 func (sw *Switch) filterPeer(p Peer) error {
+	if policy := sw.config.PeerPolicy; policy != nil && !policy.AllowPeer(string(p.ID())) {
+		return ErrRejected{id: p.ID(), err: fmt.Errorf("connection rejected by peer policy"), isFiltered: true}
+	}
+
 	// Avoid duplicate
 	if sw.peers.Has(p.ID()) {
 		return ErrRejected{id: p.ID(), isDuplicate: true}

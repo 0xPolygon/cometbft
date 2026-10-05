@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"sync"
 	"time"
 
 	"github.com/cosmos/gogoproto/proto"
@@ -67,7 +68,6 @@ func newPeerConn(
 	conn net.Conn,
 	socketAddr *NetAddress,
 ) peerConn {
-
 	return peerConn{
 		outbound:   outbound,
 		persistent: persistent,
@@ -107,7 +107,9 @@ func (pc peerConn) RemoteIP() net.IP {
 //
 // Before using a peer, you will need to perform a handshake on connection.
 type peer struct {
-	observer observation.Observer
+	observer    observation.Observer
+	policy      observation.ConnectionPolicy
+	policyClose sync.Once
 
 	service.BaseService
 
@@ -273,7 +275,7 @@ func (p *peer) TrySend(e Envelope) bool {
 func (p *peer) send(chID byte, msg proto.Message, sendFunc func(byte, []byte) bool) bool {
 	if !p.IsRunning() {
 		return false
-	} else if !p.hasChannel(chID) {
+	} else if !p.hasChannel(chID) || !p.allowConnection() {
 		return false
 	}
 	original := msg
@@ -401,7 +403,6 @@ func createMConnection(
 	onPeerError func(Peer, interface{}),
 	config cmtconn.MConnConfig,
 ) *cmtconn.MConnection {
-
 	onReceive := func(chID byte, msgBytes []byte) {
 		reactor := reactorsByCh[chID]
 		if reactor == nil {
@@ -429,7 +430,9 @@ func createMConnection(
 		}
 		p.metrics.PeerReceiveBytesTotal.With(labels...).Add(float64(len(msgBytes)))
 		p.metrics.MessageReceiveBytesTotal.With("message_type", p.mlc.ValueToMetricLabel(msg)).Add(float64(len(msgBytes)))
-		p.observe(observation.Event{Kind: observation.Received, Channel: chID, Bytes: len(msgBytes), Message: msg})
+		if !p.observe(observation.Event{Kind: observation.Received, Channel: chID, Bytes: len(msgBytes), Message: msg}) {
+			return
+		}
 		reactor.Receive(Envelope{
 			ChannelID: chID,
 			Src:       p,

@@ -33,6 +33,7 @@ func (o *testObserver) Observe(id string, e observation.Event) {
 	}
 	o.events = append(o.events, observationRecord{id, e})
 }
+
 func (o *testObserver) snapshot() []observationRecord {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -107,11 +108,15 @@ func TestPeerObservationDisabled(t *testing.T) {
 	(&Switch{config: config.DefaultP2PConfig()}).ObserveInvalid(nil, 0)
 }
 
-func observedSwitch(t *testing.T, observer observation.Observer) *Switch {
+func observedSwitch(t *testing.T, observer observation.Observer, policies ...observation.ConnectionPolicy) *Switch {
 	t.Helper()
 	conf := config.DefaultP2PConfig()
 	conf.PeerObserver = observer
+	if len(policies) > 0 {
+		conf.PeerPolicy = policies[0]
+	}
 	sw := MakeSwitch(conf, 1, initSwitchFunc)
+	t.Cleanup(func() { require.NoError(t, sw.transport.(*MultiplexTransport).Close()) })
 	ni := sw.NodeInfo().(DefaultNodeInfo)
 	ni.Channels = []byte{0, 1, 2, 3}
 	sw.SetNodeInfo(ni)

@@ -26,7 +26,14 @@ type Event struct {
 // Observer receives telemetry from concurrent networking goroutines. Implementations
 // must use bounded work and memory, must not block on I/O or queues, and must not
 // call back into networking. Install before startup; never replace while running.
-// There is deliberately no admission decision in the observation-only interface.
 type Observer interface {
 	Observe(peerID string, event Event)
+}
+
+// ConnectionPolicy checks the authenticated node ID at admission and after peer
+// activity. Like Observer, it must use bounded local work without I/O, queues or
+// networking callbacks. Install before startup; never replace while running.
+// The application owns evidence and expiry; transport keeps no separate denylist.
+type ConnectionPolicy interface {
+	AllowPeer(peerID string) bool
 }

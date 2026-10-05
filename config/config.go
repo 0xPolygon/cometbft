@@ -174,7 +174,6 @@ func (cfg *Config) CheckDeprecated() []string {
 
 // BaseConfig defines the base configuration for a CometBFT node
 type BaseConfig struct {
-
 	// The version of the CometBFT binary that created
 	// or last modified the config file
 	Version string `mapstructure:"version"`
@@ -551,7 +550,8 @@ func (cfg RPCConfig) IsTLSEnabled() bool {
 type P2PConfig struct {
 	// PeerObserver is an optional application-owned observer installed before node
 	// construction. It is never populated from operator configuration files.
-	PeerObserver observation.Observer `mapstructure:"-" json:"-" toml:"-"`
+	PeerObserver observation.Observer         `mapstructure:"-" json:"-" toml:"-"`
+	PeerPolicy   observation.ConnectionPolicy `mapstructure:"-" json:"-" toml:"-"`
 
 	RootDir string `mapstructure:"home"`
 
