@@ -961,12 +961,54 @@ func (cfg *StateSyncConfig) ValidateBasic() error {
 // BlockSyncConfig (formerly known as FastSync) defines the configuration for the CometBFT block sync service
 type BlockSyncConfig struct {
 	Version string `mapstructure:"version"`
+
+	// ServingRate bounds, in bytes per second, the block-sync response
+	// bytes this node will serve to peers that are not configured as
+	// persistent. It is a node-wide ceiling rather than a per-peer one, so
+	// it holds however many peers or subnets the requests arrive from.
+	// Zero disables it.
+	ServingRate int64 `mapstructure:"serving_rate"`
+
+	// ServingBurst is how many bytes may be served above ServingRate in a
+	// burst, so a node that has been idle can answer a catch-up
+	// immediately. Zero means two seconds of ServingRate.
+	ServingBurst int64 `mapstructure:"serving_burst"`
+
+	// ServingSubnetRate caps any single remote network prefix (a /24 for
+	// IPv4, /64 for IPv6) at this many bytes per second, so one address
+	// block cannot take the whole node-wide budget. Zero disables it.
+	ServingSubnetRate int64 `mapstructure:"serving_subnet_rate"`
+
+	// PeerByteQuota is the token-bucket capacity, in bytes, for one remote
+	// address. Tokens refill at PeerByteQuota / PeerByteQuotaPeriod, so the
+	// long-run average is one quota per period, while a period-length interval
+	// can contain up to twice the quota. Zero disables it.
+	PeerByteQuota int64 `mapstructure:"peer_byte_quota"`
+
+	// PeerByteQuotaPeriod is the refill period used to derive the quota's
+	// token rate. Deliberately short by default: a longer promise would have
+	// to survive process restarts to mean anything, and restarts are routine
+	// since an in-memory bucket resets with the process.
+	PeerByteQuotaPeriod time.Duration `mapstructure:"peer_byte_quota_period"`
+
+	// ExemptPeerIDs is a comma-separated list of node IDs exempt from
+	// ServingSubnetRate and PeerByteQuota — for known partners running
+	// legitimate bulk syncs, who need an allowance without being made
+	// persistent peers. They are still counted against ServingRate: an
+	// exemption means "not rate-shared and not quota-capped", never "may
+	// spend this node's entire budget".
+	ExemptPeerIDs string `mapstructure:"exempt_peer_ids"`
 }
 
 // DefaultBlockSyncConfig returns a default configuration for the block sync service
 func DefaultBlockSyncConfig() *BlockSyncConfig {
 	return &BlockSyncConfig{
-		Version: "v0",
+		Version:             "v0",
+		ServingRate:         32 << 20,
+		ServingBurst:        64 << 20,
+		ServingSubnetRate:   8 << 20,
+		PeerByteQuota:       512 << 20,
+		PeerByteQuotaPeriod: time.Hour,
 	}
 }
 
@@ -977,6 +1019,9 @@ func TestBlockSyncConfig() *BlockSyncConfig {
 
 // ValidateBasic performs basic validation.
 func (cfg *BlockSyncConfig) ValidateBasic() error {
+	if err := cfg.validateServing(); err != nil {
+		return err
+	}
 	switch cfg.Version {
 	case "v0":
 		return nil
@@ -985,6 +1030,49 @@ func (cfg *BlockSyncConfig) ValidateBasic() error {
 	default:
 		return fmt.Errorf("unknown blocksync version %s", cfg.Version)
 	}
+}
+
+// minServingLayerBytes is the smallest useful size for any enabled serving
+// layer. A layer whose budget cannot cover a single block-sync response is
+// not a limit, it is an outage: every response is refused forever, silently
+// and with no startup error. The blocksync reactor admits a response against
+// a fixed pre-load estimate (estimatedResponseBytes, 128 KiB at the time of
+// writing); this floor sits an order of magnitude above that so it stays
+// correct without the config package having to import the reactor's
+// constant. Any real deployment is far above it — it only catches
+// typos and unit confusion, such as writing bytes where MiB was meant.
+const minServingLayerBytes = 1 << 20
+
+func (cfg *BlockSyncConfig) validateServing() error {
+	limits := []struct {
+		name  string
+		value int64
+	}{
+		{"serving_rate", cfg.ServingRate},
+		{"serving_burst", cfg.ServingBurst},
+		{"serving_subnet_rate", cfg.ServingSubnetRate},
+		{"peer_byte_quota", cfg.PeerByteQuota},
+	}
+	for _, l := range limits {
+		if l.value < 0 {
+			return fmt.Errorf("%s can't be negative", l.name)
+		}
+		// Zero disables the layer; anything positive has to be usable.
+		if l.value > 0 && l.value < minServingLayerBytes {
+			return fmt.Errorf(
+				"%s is %d, which is below the %d-byte minimum for an enabled serving layer; "+
+					"a budget smaller than one block-sync response refuses every response. "+
+					"Set 0 to disable the layer instead",
+				l.name, l.value, minServingLayerBytes)
+		}
+	}
+	if cfg.PeerByteQuotaPeriod < 0 {
+		return errors.New("peer_byte_quota_period can't be negative")
+	}
+	if cfg.PeerByteQuota > 0 && cfg.PeerByteQuotaPeriod == 0 {
+		return errors.New("peer_byte_quota_period must be set when peer_byte_quota is")
+	}
+	return nil
 }
 
 //-----------------------------------------------------------------------------

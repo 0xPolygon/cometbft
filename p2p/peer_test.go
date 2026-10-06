@@ -4,6 +4,7 @@ import (
 	"fmt"
 	golog "log"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -42,11 +43,54 @@ func TestPeerBasic(t *testing.T) {
 
 	assert.True(p.IsRunning())
 	assert.True(p.IsOutbound())
+
+	// RemoteIP caches on *peer (not peerConn — see ipOnce's doc comment
+	// for why) so this cache write must actually persist to p.ip.
+	ip1 := p.RemoteIP()
+	require.NotNil(ip1)
+	require.NotNil(p.ip, "RemoteIP's first call must populate the cache field")
+	ip2 := p.RemoteIP()
+	assert.True(ip1.Equal(ip2))
 	assert.False(p.IsPersistent())
 	p.persistent = true
 	assert.True(p.IsPersistent())
 	assert.Equal(rp.Addr().DialString(), p.RemoteAddr().String())
 	assert.Equal(rp.ID(), p.ID())
+}
+
+// TestPeerRemoteIPConcurrentFirstCall proves RemoteIP's cache populate is
+// safe when multiple goroutines race to resolve it for the first time —
+// the shape of the actual concurrent callers in this codebase (this
+// reactor's own receive path, the RPC net_info handler, PeerSet.hasIP).
+// Before ipOnce, a bare nil-check-then-write here was a genuine data race
+// under -race, not just a theoretical one.
+func TestPeerRemoteIPConcurrentFirstCall(t *testing.T) {
+	rp := &remotePeer{PrivKey: ed25519.GenPrivKey(), Config: cfg}
+	rp.Start()
+	t.Cleanup(rp.Stop)
+
+	p, err := createOutboundPeerAndPerformHandshake(rp.Addr(), cfg, cmtconn.DefaultMConnConfig())
+	require.NoError(t, err)
+	require.NoError(t, p.Start())
+	t.Cleanup(func() {
+		_ = p.Stop()
+	})
+
+	const concurrency = 50
+	results := make([]net.IP, concurrency)
+	var wg sync.WaitGroup
+	wg.Add(concurrency)
+	for i := range concurrency {
+		go func() {
+			defer wg.Done()
+			results[i] = p.RemoteIP()
+		}()
+	}
+	wg.Wait()
+
+	for _, ip := range results {
+		require.True(t, results[0].Equal(ip), "every concurrent caller must observe the same resolved IP")
+	}
 }
 
 func TestPeerSend(t *testing.T) {

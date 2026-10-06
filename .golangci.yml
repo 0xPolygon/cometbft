@@ -95,7 +95,7 @@ linters:
             - github.com/oasisprotocol/curve25519-voi/primitives/merlin
             - github.com/ory/dockertest
             - github.com/pkg/errors
-            - github.com/prometheus/client_golang/prometheus/promhttp
+            - github.com/prometheus/client_golang/prometheus
             - github.com/spf13
             - github.com/stretchr/testify
             - github.com/decred/dcrd/dcrec/secp256k1/v4

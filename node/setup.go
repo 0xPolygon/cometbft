@@ -12,6 +12,8 @@ import (
 	_ "net/http/pprof" //nolint: gosec // securely exposed on separate, optional port
 
 	dbm "github.com/cometbft/cometbft-db"
+	prometheus "github.com/go-kit/kit/metrics/prometheus"
+	stdprometheus "github.com/prometheus/client_golang/prometheus"
 
 	abci "github.com/cometbft/cometbft/abci/types"
 	"github.com/cometbft/cometbft/blocksync"
@@ -293,7 +295,18 @@ func createBlocksyncReactor(config *cfg.Config,
 ) (bcReactor p2p.Reactor, err error) {
 	switch config.BlockSync.Version {
 	case "v0":
-		bcReactor = blocksync.NewReactorWithAddr(state.Copy(), blockExec, blockStore, blockSync, localAddr, metrics, offlineStateSyncHeight)
+		opts := []blocksync.ReactorOption{blocksync.WithServingConfig(servingConfig(config.BlockSync))}
+		if config.Instrumentation.Prometheus {
+			counter := prometheus.NewCounterFrom(stdprometheus.CounterOpts{
+				Namespace: config.Instrumentation.Namespace,
+				Subsystem: blocksync.MetricsSubsystem,
+				Name:      "send_queue_full_drops",
+				Help:      "Block requests dropped because the peer's send queue is full.",
+			}, []string{"chain_id"}).With("chain_id", state.ChainID)
+			opts = append(opts, blocksync.WithSendQueueFullDrops(counter))
+		}
+		bcReactor = blocksync.NewReactorWithAddr(state.Copy(), blockExec, blockStore, blockSync, localAddr, metrics,
+			offlineStateSyncHeight, opts...)
 	case "v1", "v2":
 		return nil, fmt.Errorf("block sync version %s has been deprecated. Please use v0", config.BlockSync.Version)
 	default:
@@ -302,6 +315,19 @@ func createBlocksyncReactor(config *cfg.Config,
 
 	bcReactor.SetLogger(logger.With("module", "blocksync"))
 	return bcReactor, nil
+}
+
+// servingConfig translates the block-sync serving limits out of the config
+// package, so the blocksync package does not have to import it.
+func servingConfig(cfg *cfg.BlockSyncConfig) blocksync.ServingConfig {
+	return blocksync.ServingConfig{
+		Rate:        float64(cfg.ServingRate),
+		Burst:       float64(cfg.ServingBurst),
+		SubnetRate:  float64(cfg.ServingSubnetRate),
+		Quota:       float64(cfg.PeerByteQuota),
+		QuotaPeriod: cfg.PeerByteQuotaPeriod,
+		ExemptIDs:   blocksync.ParseExemptPeerIDs(cfg.ExemptPeerIDs),
+	}
 }
 
 func createConsensusReactor(config *cfg.Config,

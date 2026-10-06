@@ -946,6 +946,33 @@ func TestBlockFetchAtHeight(t *testing.T) {
 	require.Nil(t, blockAtHeightPlus2, "expecting an unsuccessful load of Height()+2")
 }
 
+func TestLoadBlockProto(t *testing.T) {
+	state, bs, _, _, cleanup, _ := makeStateAndBlockStoreAndIndexers("TestLoadBlockProto")
+	defer cleanup()
+
+	// missing block returns nil
+	require.Nil(t, bs.LoadBlockProto(1))
+
+	block, err := state.MakeBlock(bs.Height()+1, nil, new(types.Commit), nil, state.Validators.GetProposer().Address)
+	require.NoError(t, err)
+	partSet, err := block.MakePartSet(types.PartSizeBytes)
+	require.NoError(t, err)
+	seenCommit := makeTestExtCommit(block.Height, cmttime.Now())
+	bs.SaveBlockWithExtendedCommit(block, partSet, seenCommit)
+
+	pbb := bs.LoadBlockProto(block.Height)
+	require.NotNil(t, pbb)
+
+	// proto representation must round-trip back to the same block
+	loaded, err := types.BlockFromProto(pbb)
+	require.NoError(t, err)
+	require.Equal(t, block.Hash(), loaded.Hash())
+
+	// LoadBlock and LoadBlockProto must agree
+	direct := bs.LoadBlock(block.Height)
+	require.Equal(t, direct.Hash(), loaded.Hash())
+}
+
 func doFn(fn func() (interface{}, error)) (res interface{}, err error, panicErr error) {
 	defer func() {
 		if r := recover(); r != nil {

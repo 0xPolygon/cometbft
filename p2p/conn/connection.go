@@ -425,6 +425,12 @@ func (c *MConnection) CanSend(chID byte) bool {
 	return channel.canSend()
 }
 
+// SendQueueFull reports whether the channel has reached its send queue capacity.
+func (c *MConnection) SendQueueFull(chID byte) bool {
+	channel, ok := c.channelsIdx[chID]
+	return ok && channel.loadSendQueueSize() >= cap(channel.sendQueue)
+}
+
 // sendRoutine polls for packets to send from channels.
 func (c *MConnection) sendRoutine() {
 	defer c._recover()
