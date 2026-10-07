@@ -385,6 +385,9 @@ func createTransport(
 		peerFilters = []p2p.PeerFilterFunc{}
 	)
 
+	p2p.MultiplexTransportDialTimeout(config.P2P.DialTimeout)(transport)
+	p2p.MultiplexTransportHandshakeTimeout(config.P2P.HandshakeTimeout)(transport)
+
 	if !config.P2P.AllowDuplicateIP {
 		connFilters = append(connFilters, p2p.ConnDuplicateIPFilter())
 	}
