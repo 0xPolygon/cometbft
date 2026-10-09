@@ -2,6 +2,7 @@ package e2e_test
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -34,21 +35,35 @@ func TestValidator_Sets(t *testing.T) {
 		valSchedule := newValidatorSchedule(*node.Testnet)
 		valSchedule.Increment(first - node.Testnet.InitialHeight)
 
+		verified := 0
 		for h := first; h <= last; h++ {
 			validators := []*types.Validator{}
 			perPage := 100
 			for page := 1; ; page++ {
 				resp, err := client.Validators(ctx, &(h), &(page), &perPage)
+				if err != nil && node.RetainBlocks > 0 && strings.Contains(err.Error(), "is not available, lowest height is") {
+					// Pruning can advance while paginating. Only tolerate it after
+					// confirming that this height is outside the retained range.
+					current, statusErr := client.Status(ctx)
+					require.NoError(t, statusErr)
+					require.Less(t, h, current.SyncInfo.EarliestBlockHeight, "unexpected validator query error: %v", err)
+					validators = nil
+					break
+				}
 				require.NoError(t, err)
 				validators = append(validators, resp.Validators...)
 				if len(validators) == resp.Total {
 					break
 				}
 			}
-			require.Equal(t, valSchedule.Set.Validators, validators,
-				"incorrect validator set at height %v", h)
+			if validators != nil {
+				verified++
+				require.Equal(t, valSchedule.Set.Validators, validators,
+					"incorrect validator set at height %v", h)
+			}
 			valSchedule.Increment(1)
 		}
+		require.Positive(t, verified, "no retained validator sets were verified")
 	})
 }
 

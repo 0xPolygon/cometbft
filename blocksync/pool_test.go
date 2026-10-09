@@ -103,63 +103,39 @@ func makePeers(numPeers int, minHeight, maxHeight int64) testPeers {
 }
 
 func TestBlockPoolBasic(t *testing.T) {
-	var (
-		start      = int64(42)
-		peers      = makePeers(10, start, 1000)
-		errorsCh   = make(chan peerError)
-		requestsCh = make(chan BlockRequest)
-	)
+	const start = int64(42)
+	peers := makePeers(10, start, 1000)
+	requestsCh := make(chan BlockRequest, 2*len(peers)*maxPendingRequestsPerPeer)
+	errorsCh := make(chan peerError, len(peers))
 	pool := NewBlockPool(start, requestsCh, errorsCh)
 	pool.SetLogger(log.TestingLogger())
-
-	err := pool.Start()
-	if err != nil {
-		t.Error(err)
+	for _, peer := range peers {
+		pool.SetPeerRange(peer.id, start, 1000)
 	}
-
-	t.Cleanup(func() {
-		if err := pool.Stop(); err != nil {
-			t.Error(err)
-		}
-	})
-
-	peers.start()
-	defer peers.stop()
-
-	// Introduce each peer.
-	go func() {
-		for _, peer := range peers {
-			pool.SetPeerRange(peer.id, peer.base, peer.height)
-		}
-	}()
-
-	// Start a goroutine to pull blocks
-	go func() {
-		for {
-			if !pool.IsRunning() {
-				return
-			}
-			first, second, _ := pool.PeekTwoBlocks()
-			if first != nil && second != nil {
-				pool.PopRequest()
-			} else {
-				time.Sleep(1 * time.Second)
-			}
-		}
-	}()
-
-	// Pull from channels
-	for {
+	require.NoError(t, pool.Start())
+	t.Cleanup(func() { require.NoError(t, pool.Stop()) })
+	deadline := time.NewTimer(30 * time.Second)
+	defer deadline.Stop()
+	for pool.Height() < 300 {
 		select {
 		case err := <-errorsCh:
-			t.Error(err)
+			t.Fatal(err)
 		case request := <-requestsCh:
-			t.Logf("Pulled new BlockRequest %v", request)
-			if request.Height == 300 {
-				return // Done!
+			block := &types.Block{Header: types.Header{Height: request.Height}, LastCommit: &types.Commit{}}
+			err := pool.AddBlock(request.PeerID, block, &types.ExtendedCommit{Height: request.Height}, 123)
+			// A second requested copy can arrive after the first was committed.
+			if request.Height >= pool.Height() {
+				require.NoError(t, err)
 			}
-
-			peers[request.PeerID].inputChan <- inputData{t, pool, request}
+			for {
+				first, second, _ := pool.PeekTwoBlocks()
+				if first == nil || second == nil {
+					break
+				}
+				pool.PopRequest()
+			}
+		case <-deadline.C:
+			t.Fatal("block pool did not reach height 300")
 		}
 	}
 }
