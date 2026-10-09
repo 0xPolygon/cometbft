@@ -49,7 +49,7 @@ func (p *trackedBlockPeer) TrySendTracked(e p2p.Envelope, done func(bool)) bool 
 func (p *trackedBlockPeer) TrySend(e p2p.Envelope) bool { p.message = e; return true }
 
 func TestNativeServingBlockCompletion(t *testing.T) {
-	for _, kind := range []string{"flushed", "failed_flush", "queue_full", "missing_commit", "missing_block"} {
+	for _, kind := range []string{"flushed", "failed_flush", "queue_full", "missing_commit", "missing_block", "legacy_exhausted"} {
 		t.Run(kind, func(t *testing.T) {
 			doc, vals := genesisDocWithValsPowers([]int64{10})
 			var opts []reactorOption
@@ -64,13 +64,16 @@ func TestNativeServingBlockCompletion(t *testing.T) {
 			config.ServingPolicy = policy
 			r := pair.reactor.Reactor
 			r.SetSwitch(p2p.NewSwitch(config, nil))
+			if kind == "legacy_exhausted" {
+				r.servingBudget = newServingBudget(ServingConfig{Rate: 1, Burst: 1})
+			}
 			peer := &trackedBlockPeer{blockServingPeer: newBlockServingPeer(t, false), reject: kind == "queue_full"}
 			height := int64(1)
 			if kind == "missing_block" {
 				height = 2
 			}
 			got := r.respondToPeer(&bc.BlockRequest{Height: height}, peer)
-			require.Equal(t, kind == "flushed" || kind == "failed_flush" || kind == "missing_block", got)
+			require.Equal(t, kind == "flushed" || kind == "failed_flush" || kind == "missing_block" || kind == "legacy_exhausted", got)
 			require.Equal(t, []servebudget.Request{{Family: servebudget.Block, Height: uint64(height), MaxBytes: MaxMsgSize}}, policy.requests)
 			if peer.done != nil {
 				require.Empty(t, lease.results)
@@ -78,12 +81,12 @@ func TestNativeServingBlockCompletion(t *testing.T) {
 				require.Equal(t, int64(1), response.Block.Header.Height)
 				require.NotNil(t, response.ExtCommit)
 				require.Equal(t, uint64(proto.Size(response.Wrap())), lease.size)
-				peer.done(kind == "flushed")
+				peer.done(kind == "flushed" || kind == "legacy_exhausted")
 			}
 			if kind == "missing_block" {
 				require.IsType(t, &bc.NoBlockResponse{}, peer.message.Message)
 			}
-			require.Equal(t, []bool{kind == "flushed"}, lease.results)
+			require.Equal(t, []bool{kind == "flushed" || kind == "legacy_exhausted"}, lease.results)
 		})
 	}
 }

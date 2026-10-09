@@ -427,6 +427,17 @@ func TestStateFullRound1(t *testing.T) {
 	propCh := subscribe(cs.eventBus, types.EventQueryCompleteProposal)
 	newRoundCh := subscribe(cs.eventBus, types.EventQueryNewRound)
 
+	// Capture the completed proposal while consensus owns its lock. Taking
+	// GetRoundState's read lock after the proposal event can deadlock against
+	// consensus publishing to the unbuffered vote subscription below.
+	proposalState := make(chan cstypes.RoundState, 1)
+	cs.doPrevote = func(h int64, r int32) {
+		if h == height && r == round {
+			proposalState <- cs.RoundState
+		}
+		cs.defaultDoPrevote(h, r)
+	}
+
 	// Maybe it would be better to call explicitly startRoutines(4)
 	startTestRound(cs, height, round)
 
@@ -434,7 +445,12 @@ func TestStateFullRound1(t *testing.T) {
 
 	ensureNewProposal(propCh, height, round)
 
-	rs := cs.GetRoundState()
+	var rs cstypes.RoundState
+	select {
+	case rs = <-proposalState:
+	case <-time.After(time.Second):
+		t.Fatal("proposal state was not captured before prevote")
+	}
 
 	propBlob := rs.ProposalBlob
 	require.NotEmpty(t, propBlob, "blob should not be empty")
@@ -451,7 +467,7 @@ func TestStateFullRound1(t *testing.T) {
 
 	ensurePrevote(voteCh, height, round) // wait for prevote
 
-	propBlockHash := cs.GetRoundState().ProposalBlock.Hash()
+	propBlockHash := rs.ProposalBlock.Hash()
 	validatePrevote(t, cs, round, vss[0], propBlockHash)
 
 	ensurePrecommit(voteCh, height, round) // wait for precommit

@@ -117,3 +117,26 @@ func testServingCompletion(t *testing.T, family, outcome string) {
 	require.Equal(t, []bool{outcome == "flushed"}, lease.results)
 	app.AssertExpectations(t)
 }
+
+func (p *trackedServingPeer) TrySend(e p2p.Envelope) bool {
+	p.messages = append(p.messages, e)
+	return true
+}
+
+func TestNativeServingMissingChunk(t *testing.T) {
+	lease := &servingLease{allow: true}
+	policy := &acceptedPolicy{lease: lease}
+	config := cfg.DefaultP2PConfig()
+	config.ServingPolicy = policy
+	app := &mocks.AppConnSnapshot{}
+	app.On("LoadSnapshotChunk", mock.Anything, &abci.RequestLoadSnapshotChunk{Height: 1, Format: 2, Chunk: 3}).Return(&abci.ResponseLoadSnapshotChunk{}, nil).Once()
+	r := NewReactor(*cfg.DefaultStateSyncConfig(), app, nil, NopMetrics())
+	r.SetSwitch(p2p.NewSwitch(config, nil))
+	peer := &trackedServingPeer{}
+	r.serveChunk(p2p.Envelope{Src: peer}, &ss.ChunkRequest{Height: 1, Format: 2, Index: 3})
+	require.Equal(t, []p2p.Envelope{{ChannelID: ChunkChannel, Message: &ss.ChunkResponse{Height: 1, Format: 2, Index: 3, Missing: true}}}, peer.messages)
+	require.Empty(t, peer.callbacks, "missing chunks must not gain transfer completion credit")
+	require.Zero(t, lease.size)
+	require.Equal(t, []bool{false}, lease.results)
+	app.AssertExpectations(t)
+}

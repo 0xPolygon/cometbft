@@ -7,6 +7,7 @@ import (
 	cfg "github.com/cometbft/cometbft/config"
 	"github.com/cometbft/cometbft/p2p"
 	"github.com/cometbft/cometbft/p2p/servebudget"
+	bc "github.com/cometbft/cometbft/proto/tendermint/blocksync"
 	"github.com/cometbft/cometbft/types"
 	"github.com/stretchr/testify/require"
 )
@@ -64,4 +65,26 @@ func TestServingPoolEvidence(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestServingValidationEvidenceClassification(t *testing.T) {
+	policy := &evidencePolicy{}
+	config := cfg.DefaultP2PConfig()
+	config.ServingPolicy = policy
+	r := &Reactor{}
+	r.BaseReactor = *p2p.NewBaseReactor("test", r)
+	r.SetSwitch(p2p.NewSwitch(config, nil))
+	r.observeInvalidServing(p2p.Envelope{Src: servingPeer{}, Message: &bc.BlockRequest{Height: -1}})
+	r.observeInvalidServing(p2p.Envelope{Src: servingPeer{}, Message: &bc.BlockResponse{}})
+	require.Equal(t, []servebudget.Evidence{servebudget.MalformedRequest, servebudget.InvalidResponse}, policy.reasons)
+	require.Equal(t, []string{string(servingPeer{}.ID()), string(servingPeer{}.ID())}, policy.ids)
+}
+
+func TestServingResponseErrorPreservesCause(t *testing.T) {
+	cause := errors.New("invalid peer response")
+	pool := NewBlockPool(1, nil, nil)
+	err := pool.rejectResponse(cause, servingPeer{}.ID())
+	require.ErrorIs(t, err, cause)
+	var fault invalidResponseError
+	require.ErrorAs(t, err, &fault)
 }
