@@ -262,8 +262,14 @@ func (p *peer) Send(e Envelope) bool {
 	return p.send(e.ChannelID, e.Message, p.mconn.Send)
 }
 
-// TrySend msg bytes to the channel identified by chID byte. Immediately returns
-// false if the send queue is full.
+// TrySendTracked transfers completion reporting to the native connection writer.
+func (p *peer) TrySendTracked(e Envelope, done func(bool)) bool {
+	return p.send(e.ChannelID, e.Message, func(id byte, data []byte) bool {
+		return p.mconn.TrySendTracked(id, data, done)
+	})
+}
+
+// TrySend returns false immediately if the channel queue is full.
 func (p *peer) TrySend(e Envelope) bool {
 	return p.send(e.ChannelID, e.Message, p.mconn.TrySend)
 }

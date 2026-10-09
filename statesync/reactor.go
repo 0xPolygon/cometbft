@@ -6,6 +6,8 @@ import (
 	"sort"
 	"time"
 
+	"github.com/cometbft/cometbft/p2p/servebudget"
+
 	abci "github.com/cometbft/cometbft/abci/types"
 	"github.com/cometbft/cometbft/config"
 	cmtsync "github.com/cometbft/cometbft/libs/sync"
@@ -111,6 +113,13 @@ func (r *Reactor) Receive(e p2p.Envelope) {
 
 	err := validateMsg(e.Message, r.cfg.MaxSnapshotChunks)
 	if err != nil {
+		if !errors.Is(err, ErrExceedsMaxSnapshotChunks) {
+			reason := servebudget.InvalidResponse
+			if _, ok := e.Message.(*ssproto.ChunkRequest); ok {
+				reason = servebudget.MalformedRequest
+			}
+			r.Switch.ObserveServing(e.Src, reason)
+		}
 		if errors.Is(err, ErrExceedsMaxSnapshotChunks) {
 			r.syncer.RejectPeer(e.Src)
 		}
@@ -123,25 +132,7 @@ func (r *Reactor) Receive(e p2p.Envelope) {
 	case SnapshotChannel:
 		switch msg := e.Message.(type) {
 		case *ssproto.SnapshotsRequest:
-			snapshots, err := r.recentSnapshots(recentSnapshots)
-			if err != nil {
-				r.Logger.Error("Failed to fetch snapshots", "err", err)
-				return
-			}
-			for _, snapshot := range snapshots {
-				r.Logger.Debug("Advertising snapshot", "height", snapshot.Height,
-					"format", snapshot.Format, "peer", e.Src.ID())
-				e.Src.Send(p2p.Envelope{
-					ChannelID: e.ChannelID,
-					Message: &ssproto.SnapshotsResponse{
-						Height:   snapshot.Height,
-						Format:   snapshot.Format,
-						Chunks:   snapshot.Chunks,
-						Hash:     snapshot.Hash,
-						Metadata: snapshot.Metadata,
-					},
-				})
-			}
+			r.serveSnapshots(e)
 
 		case *ssproto.SnapshotsResponse:
 			r.mtx.RLock()
@@ -172,30 +163,7 @@ func (r *Reactor) Receive(e p2p.Envelope) {
 	case ChunkChannel:
 		switch msg := e.Message.(type) {
 		case *ssproto.ChunkRequest:
-			r.Logger.Debug("Received chunk request", "height", msg.Height, "format", msg.Format,
-				"chunk", msg.Index, "peer", e.Src.ID())
-			resp, err := r.conn.LoadSnapshotChunk(context.TODO(), &abci.RequestLoadSnapshotChunk{
-				Height: msg.Height,
-				Format: msg.Format,
-				Chunk:  msg.Index,
-			})
-			if err != nil {
-				r.Logger.Error("Failed to load chunk", "height", msg.Height, "format", msg.Format,
-					"chunk", msg.Index, "err", err)
-				return
-			}
-			r.Logger.Debug("Sending chunk", "height", msg.Height, "format", msg.Format,
-				"chunk", msg.Index, "peer", e.Src.ID())
-			e.Src.Send(p2p.Envelope{
-				ChannelID: ChunkChannel,
-				Message: &ssproto.ChunkResponse{
-					Height:  msg.Height,
-					Format:  msg.Format,
-					Index:   msg.Index,
-					Chunk:   resp.Chunk,
-					Missing: resp.Chunk == nil,
-				},
-			})
+			r.serveChunk(e, msg)
 
 		case *ssproto.ChunkResponse:
 			r.mtx.RLock()

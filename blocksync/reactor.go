@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cometbft/cometbft/p2p/servebudget"
+
 	kitmetrics "github.com/go-kit/kit/metrics"
 	"github.com/go-kit/kit/metrics/discard"
 
@@ -243,8 +245,13 @@ func (bcR *Reactor) RemovePeer(peer p2p.Peer, _ interface{}) {
 }
 
 // respondToPeer checks request limits, queue space and byte budgets before loading a block.
-// Persistent peers bypass request and byte limits, but still need queue space.
+// Persistent peers bypass legacy limits, but not an injected shared policy or queue limits.
 func (bcR *Reactor) respondToPeer(msg *bcproto.BlockRequest, src p2p.Peer) (queued bool) {
+	lease, admitted := bcR.Switch.AdmitServing(src, servebudget.Request{Family: servebudget.Block, Height: uint64(msg.Height), MaxBytes: MaxMsgSize})
+	if !admitted {
+		return false
+	}
+	defer func() { p2p.FinishServing(lease) }()
 	exempt := exemptFromRateLimit(src, bcR.store.Height())
 	if !allowBlockRequest(bcR, src, msg) {
 		return false
@@ -257,7 +264,7 @@ func (bcR *Reactor) respondToPeer(msg *bcproto.BlockRequest, src p2p.Peer) (queu
 	// Admission precedes the store read and marshal below on purpose: a
 	// response we cannot afford must not first cost us the work of preparing
 	// it. release is deferred so every return path gives back what it charged.
-	res, admitted := bcR.reserveServing(src, exempt)
+	res, admitted := bcR.reserveServing(src, exempt || bcR.Switch.ServingPolicy() != nil)
 	if !admitted {
 		return false
 	}
@@ -266,18 +273,12 @@ func (bcR *Reactor) respondToPeer(msg *bcproto.BlockRequest, src p2p.Peer) (queu
 	// Load the block already in proto form to skip the BlockFromProto+ToProto
 	// round-trip respondToPeer used to pay on every call (cherry-picked from
 	// upstream cometbft#5761).
-	bl := bcR.store.LoadBlockProto(msg.Height)
-	if bl == nil {
-		bcR.Logger.Info("Peer asking for a block we don't have", "src", src, "height", msg.Height)
-		return src.TrySend(p2p.Envelope{
-			ChannelID: BlocksyncChannel,
-			Message:   &bcproto.NoBlockResponse{Height: msg.Height},
-		})
-	}
-
-	extCommit, ok := bcR.loadExtCommit(msg.Height)
-	if !ok {
+	response := bcR.loadServingResponse(msg.Height)
+	if response == nil {
 		return false
+	}
+	if response.Block == nil {
+		return src.TrySend(p2p.Envelope{ChannelID: BlocksyncChannel, Message: &bcproto.NoBlockResponse{Height: msg.Height}})
 	}
 
 	// Charged before the send, not after: a budget cannot un-send bytes, so
@@ -285,18 +286,17 @@ func (bcR *Reactor) respondToPeer(msg *bcproto.BlockRequest, src p2p.Peer) (queu
 	// the admitted estimate covered. A queue-full TrySend is the one case
 	// where the bytes are genuinely not spent, which the deferred release
 	// covers.
-	served := float64(bl.Size() + extCommit.Size() + blockResponseOverheadBytes)
+	served := float64(response.Block.Size() + response.ExtCommit.Size() + blockResponseOverheadBytes)
 	if !res.settle(served) {
 		bcR.metrics.ServingBudgetDrops.Add(1)
 		return false
 	}
-	if !src.TrySend(p2p.Envelope{
+	sent := p2p.SendServing(src, lease, p2p.Envelope{
 		ChannelID: BlocksyncChannel,
-		Message: &bcproto.BlockResponse{
-			Block:     bl,
-			ExtCommit: extCommit,
-		},
-	}) {
+		Message:   response,
+	})
+	lease = nil
+	if !sent {
 		return false
 	}
 	res.commit()
@@ -305,8 +305,9 @@ func (bcR *Reactor) respondToPeer(msg *bcproto.BlockRequest, src p2p.Peer) (queu
 }
 
 // Receive implements Reactor by handling 4 types of messages (look below).
-func (bcR *Reactor) Receive(e p2p.Envelope) { //nolint: dupl // recreated in a test
+func (bcR *Reactor) Receive(e p2p.Envelope) {
 	if err := ValidateMsg(e.Message); err != nil {
+		bcR.observeInvalidServing(e)
 		bcR.Logger.Error("Peer sent us invalid msg", "peer", e.Src, "msg", e.Message, "err", err)
 		bcR.Switch.StopPeerForError(e.Src, err)
 		return
@@ -320,6 +321,7 @@ func (bcR *Reactor) Receive(e p2p.Envelope) { //nolint: dupl // recreated in a t
 	case *bcproto.BlockResponse:
 		bi, err := types.BlockFromProto(msg.Block)
 		if err != nil {
+			bcR.Switch.ObserveServing(e.Src, servebudget.InvalidResponse)
 			bcR.Logger.Error("Peer sent us invalid block", "peer", e.Src, "msg", e.Message, "err", err)
 			bcR.Switch.StopPeerForError(e.Src, err)
 			return
@@ -329,6 +331,7 @@ func (bcR *Reactor) Receive(e p2p.Envelope) { //nolint: dupl // recreated in a t
 			var err error
 			extCommit, err = types.ExtendedCommitFromProto(msg.ExtCommit)
 			if err != nil {
+				bcR.Switch.ObserveServing(e.Src, servebudget.InvalidResponse)
 				bcR.Logger.Error("failed to convert extended commit from proto",
 					"peer", e.Src,
 					"err", err)

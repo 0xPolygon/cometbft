@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cometbft/cometbft/p2p/servebudget"
+
 	cstypes "github.com/cometbft/cometbft/consensus/types"
 	"github.com/cometbft/cometbft/libs/bits"
 	cmtevents "github.com/cometbft/cometbft/libs/events"
@@ -719,7 +721,7 @@ OUTER_LOOP:
 
 			// if we never received the commit message from the peer, the block parts wont be initialized
 			if prs.ProposalBlockParts == nil {
-				blockMeta := conR.conS.blockStore.LoadBlockMeta(prs.Height)
+				blockMeta := conR.loadCatchupMeta(peer, prs.Height)
 				if blockMeta == nil {
 					heightLogger.Error("Failed to load block meta",
 						"blockstoreBase", blockStoreBase, "blockstoreHeight", conR.conS.blockStore.Height())
@@ -788,27 +790,17 @@ func (conR *Reactor) gossipDataForCatchup(logger log.Logger, rs *cstypes.RoundSt
 	prs *cstypes.PeerRoundState, ps *PeerState, peer p2p.Peer,
 ) {
 	if index, ok := prs.ProposalBlockParts.Not().PickRandom(); ok {
-		// Ensure that the peer's PartSetHeader is correct
-		blockMeta := conR.conS.blockStore.LoadBlockMeta(prs.Height)
-		if blockMeta == nil {
-			logger.Error("Failed to load block meta", "ourHeight", rs.Height,
-				"blockstoreBase", conR.conS.blockStore.Base(), "blockstoreHeight", conR.conS.blockStore.Height())
-			time.Sleep(conR.conS.config.PeerGossipSleepDuration)
-			return
-		} else if !blockMeta.BlockID.PartSetHeader.Equals(prs.ProposalBlockPartSetHeader) {
-			logger.Info("Peer ProposalBlockPartSetHeader mismatch, sleeping",
-				"blockPartSetHeader", blockMeta.BlockID.PartSetHeader, "peerBlockPartSetHeader", prs.ProposalBlockPartSetHeader)
+		lease, admitted := conR.Switch.AdmitServing(peer, servebudget.Request{Family: servebudget.Catchup, Height: uint64(prs.Height), Index: uint32(index), MaxBytes: uint64(maxMsgSize)})
+		if !admitted {
 			time.Sleep(conR.conS.config.PeerGossipSleepDuration)
 			return
 		}
-		// Load the part
-		part := conR.conS.blockStore.LoadBlockPart(prs.Height, index)
+		defer func() { p2p.FinishServing(lease) }()
+		part := conR.loadCatchupPart(logger, rs, prs, index)
 		if part == nil {
-			logger.Error("Could not load part", "index", index,
-				"blockPartSetHeader", blockMeta.BlockID.PartSetHeader, "peerBlockPartSetHeader", prs.ProposalBlockPartSetHeader)
-			time.Sleep(conR.conS.config.PeerGossipSleepDuration)
 			return
 		}
+
 		// Send the part
 		logger.Debug("Sending block part for catchup", "round", prs.Round, "index", index)
 		pp, err := part.ToProto()
@@ -816,14 +808,16 @@ func (conR *Reactor) gossipDataForCatchup(logger log.Logger, rs *cstypes.RoundSt
 			logger.Error("Could not convert part to proto", "index", index, "error", err)
 			return
 		}
-		if peer.Send(p2p.Envelope{
+		sent := p2p.SendServing(peer, lease, p2p.Envelope{
 			ChannelID: DataChannel,
 			Message: &cmtcons.BlockPart{
 				Height: prs.Height, // Not our height, so it doesn't matter.
 				Round:  prs.Round,  // Not our height, so it doesn't matter.
 				Part:   *pp,
 			},
-		}) {
+		})
+		lease = nil
+		if sent {
 			ps.SetHasProposalBlockPart(prs.Height, prs.Round, index)
 		} else {
 			logger.Debug("Sending block part for catchup failed")
@@ -872,7 +866,7 @@ OUTER_LOOP:
 		// Special catchup logic.
 		// If peer is lagging by height 1, send LastCommit.
 		if prs.Height != 0 && rs.Height == prs.Height+1 {
-			if ps.PickSendVote(rs.LastCommit) {
+			if conR.sendCatchupVote(peer, ps, prs.Height, func() types.VoteSetReader { return rs.LastCommit }) {
 				logger.Debug("Picked rs.LastCommit to send", "height", prs.Height)
 				continue OUTER_LOOP
 			}
@@ -882,29 +876,7 @@ OUTER_LOOP:
 		// If peer is lagging by more than 1, send Commit.
 		blockStoreBase := conR.conS.blockStore.Base()
 		if blockStoreBase > 0 && prs.Height > 0 && prs.Height <= rs.Height-2 && prs.Height >= blockStoreBase {
-			// Load the block's extended commit for prs.Height,
-			// which contains precommit signatures for prs.Height.
-			var ec *types.ExtendedCommit
-			var veEnabled bool
-			func() {
-				conR.conS.mtx.RLock()
-				defer conR.conS.mtx.RUnlock()
-				veEnabled = conR.conS.state.ConsensusParams.ABCI.VoteExtensionsEnabled(prs.Height)
-			}()
-			if veEnabled {
-				ec = conR.conS.blockStore.LoadBlockExtendedCommit(prs.Height)
-			} else {
-				c := conR.conS.blockStore.LoadBlockCommit(prs.Height)
-				if c == nil {
-					continue
-				}
-				ec = c.WrappedExtendedCommit()
-			}
-			if ec == nil {
-				continue
-			}
-			if ps.PickSendVote(ec) {
-				logger.Debug("Picked Catchup commit to send", "height", prs.Height)
+			if conR.sendCatchupVote(peer, ps, prs.Height, func() types.VoteSetReader { return conR.loadCatchupCommit(prs.Height) }) {
 				continue OUTER_LOOP
 			}
 		}
@@ -1064,7 +1036,7 @@ OUTER_LOOP:
 			prs := ps.GetRoundState()
 			if prs.CatchupCommitRound != -1 && prs.Height > 0 && prs.Height <= conR.conS.blockStore.Height() &&
 				prs.Height >= conR.conS.blockStore.Base() {
-				if commit := conR.conS.LoadCommit(prs.Height); commit != nil {
+				if commit := conR.loadCatchupMajority(peer, prs.Height); commit != nil {
 					peer.TrySend(p2p.Envelope{
 						ChannelID: StateChannel,
 						Message: &cmtcons.VoteSetMaj23{
