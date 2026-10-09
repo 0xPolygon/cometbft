@@ -424,6 +424,7 @@ func (r *Reactor) poolRoutine(stateSynced bool) {
 			case err := <-r.errorsCh:
 				peer := r.Switch.Peers().Get(err.peerID)
 				if peer != nil {
+					r.observePeerError(peer, err.err)
 					r.Switch.StopPeerForError(peer, err)
 				}
 
