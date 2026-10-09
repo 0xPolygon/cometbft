@@ -97,3 +97,21 @@ func TestTrackedFlushFailureKeepsQueuedReservations(t *testing.T) {
 	c.cancelReceipts()
 	require.Len(t, completed, 2)
 }
+
+func TestTrackedRejectsUnknownChannel(t *testing.T) {
+	a, b := net.Pipe()
+	t.Cleanup(func() { require.NoError(t, b.Close()) })
+	c := NewMConnection(a, []*ChannelDescriptor{{ID: 1, Priority: 1}}, func(byte, []byte) {}, func(interface{}) {})
+	require.NoError(t, c.Start())
+	t.Cleanup(func() { require.NoError(t, c.Stop()) })
+	var callbacks atomic.Int64
+	require.False(t, c.TrySendTracked(2, []byte("unknown channel"), func(bool) { callbacks.Add(1) }))
+	// A rejected message leaves ownership with the caller. It must neither
+	// acquire a receipt nor leave the receipt lock held for a subsequent send.
+	c.receiptMu.Lock()
+	require.Empty(t, c.receipts)
+	c.receiptMu.Unlock()
+	require.True(t, c.TrySendTracked(1, []byte("known channel"), func(bool) { callbacks.Add(1) }))
+	c.cancelReceipts()
+	require.Equal(t, int64(1), callbacks.Load())
+}

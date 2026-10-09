@@ -95,6 +95,11 @@ func testServingCompletion(t *testing.T, family, outcome string) {
 	require.NoError(t, r.Start())
 	t.Cleanup(func() { require.NoError(t, r.Stop()) })
 	r.Receive(p2p.Envelope{Src: peer, ChannelID: channel, Message: request})
+	if family == "chunk" {
+		require.Equal(t, []servebudget.Request{{Family: servebudget.Chunk, Height: 1, Format: 2, Index: 3, MaxBytes: uint64(chunkMsgSize)}}, policy.requests)
+	} else {
+		require.Equal(t, []servebudget.Request{{Family: servebudget.Snapshot, MaxBytes: uint64(recentSnapshots * snapshotMsgSize)}}, policy.requests)
+	}
 	if loadErr == nil {
 		var size uint64
 		for _, msg := range expected {
