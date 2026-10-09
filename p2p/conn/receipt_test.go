@@ -115,3 +115,40 @@ func TestTrackedRejectsUnknownChannel(t *testing.T) {
 	c.cancelReceipts()
 	require.Equal(t, int64(1), callbacks.Load())
 }
+
+type trackedBlockedConn struct {
+	net.Conn
+	started chan struct{}
+	once    sync.Once
+}
+
+func (c *trackedBlockedConn) Write(p []byte) (int, error) {
+	c.once.Do(func() { close(c.started) })
+	return c.Conn.Write(p)
+}
+
+func TestTrackedQueueFullRetainsCallerOwnership(t *testing.T) {
+	a, b := net.Pipe()
+	t.Cleanup(func() { require.NoError(t, b.Close()) })
+	blocked := &trackedBlockedConn{Conn: a, started: make(chan struct{})}
+	c := NewMConnection(blocked, []*ChannelDescriptor{{ID: 1, Priority: 1, SendQueueCapacity: 1}}, func(byte, []byte) {}, func(interface{}) {})
+	require.NoError(t, c.Start())
+	t.Cleanup(func() { require.NoError(t, c.Stop()) })
+	var completed atomic.Int64
+	done := func(ok bool) { require.False(t, ok); completed.Add(1) }
+	require.True(t, c.TrySendTracked(1, make([]byte, 64<<10), done))
+	// The socket is now blocked with the first frame. Fill the sole remaining
+	// queue slot so refusal is deterministic regardless of writer scheduling.
+	select {
+	case <-blocked.started:
+	case <-time.After(time.Second):
+		t.Fatal("writer did not reach the socket")
+	}
+	require.True(t, c.TrySendTracked(1, []byte{1}, done))
+	require.False(t, c.TrySendTracked(1, []byte{2}, done))
+	c.receiptMu.Lock()
+	require.Len(t, c.receipts, 2)
+	c.receiptMu.Unlock()
+	c.cancelReceipts()
+	require.Equal(t, int64(2), completed.Load())
+}
