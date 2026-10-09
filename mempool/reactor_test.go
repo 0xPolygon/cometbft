@@ -89,7 +89,7 @@ func TestReactorConcurrency(t *testing.T) {
 
 		// 1. submit a bunch of txs
 		// 2. update the whole mempool
-		txs := addRandomTxs(t, reactors[0].mempool, numTxs, UnknownPeerID)
+		txs := addConcurrentTxs(t, reactors[0].mempool, numTxs)
 		go func() {
 			defer wg.Done()
 
@@ -106,7 +106,7 @@ func TestReactorConcurrency(t *testing.T) {
 
 		// 1. submit a bunch of txs
 		// 2. update none
-		_ = addRandomTxs(t, reactors[1].mempool, numTxs, UnknownPeerID)
+		_ = addConcurrentTxs(t, reactors[1].mempool, numTxs)
 		go func() {
 			defer wg.Done()
 
@@ -430,4 +430,22 @@ func TestMempoolVectors(t *testing.T) {
 
 		require.Equal(t, tc.expBytes, hex.EncodeToString(bz), tc.testName)
 	}
+}
+
+// Updates may temporarily refuse admission during recheck. Retry that documented
+// result while preserving the concurrent update/broadcast workload.
+func addConcurrentTxs(t *testing.T, mem Mempool, count int) types.Txs {
+	t.Helper()
+	txs := NewRandomTxs(count, 20)
+	for _, tx := range txs {
+		err := mem.CheckTx(tx, nil, TxInfo{SenderID: UnknownPeerID})
+		if errors.Is(err, ErrRecheckFull) {
+			require.Eventually(t, func() bool {
+				err = mem.CheckTx(tx, nil, TxInfo{SenderID: UnknownPeerID})
+				return !errors.Is(err, ErrRecheckFull)
+			}, 5*time.Second, time.Millisecond)
+		}
+		require.NoError(t, err)
+	}
+	return txs
 }
