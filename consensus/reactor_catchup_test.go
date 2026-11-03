@@ -1,6 +1,7 @@
 package consensus
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -103,9 +104,8 @@ func TestIsLocalSoleValidator(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cs := &State{}
-			cs.privValidatorPubKey = tt.pubKey
-			cs.Validators = tt.valSet
-			assert.Equal(t, tt.want, cs.isLocalSoleValidator())
+			cs.setPrivValidatorPubKey(tt.pubKey)
+			assert.Equal(t, tt.want, cs.isLocalSoleValidator(tt.valSet))
 		})
 	}
 }
@@ -124,14 +124,15 @@ func TestReactorCatchupConfig(t *testing.T) {
 func newCatchupReactor(t *testing.T, myHeight int64, sole bool, peerHeights ...int64) *Reactor {
 	t.Helper()
 	cs := &State{}
+	rs := &cstypes.RoundState{Height: myHeight}
 	if sole {
 		val, _ := types.RandValidator(false, 10)
-		cs.Validators = types.NewValidatorSet([]*types.Validator{val})
-		cs.privValidatorPubKey = val.PubKey
+		rs.Validators = types.NewValidatorSet([]*types.Validator{val})
+		cs.setPrivValidatorPubKey(val.PubKey)
 	}
 	conR := &Reactor{
 		conS:                cs,
-		rs:                  &cstypes.RoundState{Height: myHeight},
+		rs:                  rs,
 		catchUpLagThreshold: 5,
 		catchUpDebounce:     0,
 	}
@@ -202,4 +203,26 @@ func TestApplyDebounce(t *testing.T) {
 		conR := &Reactor{catchUpDebounce: 0}
 		assert.True(t, conR.applyDebounceLocked(true, t0))
 	})
+}
+
+// TestIsBehindWithConsensusStateLocked checks that IsBehind (used by RPC
+// Status) returns while the consensus state lock is held.
+func TestIsBehindWithConsensusStateLocked(t *testing.T) {
+	for _, sole := range []bool{false, true} {
+		t.Run(fmt.Sprintf("sole=%v", sole), func(t *testing.T) {
+			conR := newCatchupReactor(t, 100, sole, 100, 100, 100)
+
+			conR.conS.mtx.Lock()
+			defer conR.conS.mtx.Unlock()
+			done := make(chan bool, 1)
+			go func() { done <- conR.IsBehind() }()
+
+			select {
+			case behind := <-done:
+				require.False(t, behind)
+			case <-time.After(5 * time.Second):
+				t.Fatal("IsBehind blocked while the consensus state lock was held")
+			}
+		})
+	}
 }

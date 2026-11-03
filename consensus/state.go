@@ -9,6 +9,7 @@ import (
 	"os"
 	"runtime/debug"
 	"sort"
+	"sync/atomic"
 	"time"
 
 	"github.com/cosmos/gogoproto/proto"
@@ -105,6 +106,9 @@ type State struct {
 	// privValidator pubkey, memoized for the duration of one block
 	// to avoid extra requests to HSM
 	privValidatorPubKey crypto.PubKey
+	// privValidatorAddr is privValidatorPubKey.Address(), readable without mtx
+	// (see isLocalSoleValidator).
+	privValidatorAddr atomic.Pointer[crypto.Address]
 
 	// state changes may be triggered by: msgs from peers,
 	// msgs from ourself, or by timeouts
@@ -2723,22 +2727,34 @@ func (cs *State) updatePrivValidatorPubKey() error {
 	if err != nil {
 		return err
 	}
-	cs.privValidatorPubKey = pubKey
+	cs.setPrivValidatorPubKey(pubKey)
 	return nil
 }
 
-// isLocalSoleValidator reports whether this node is the only validator in the
-// current set, i.e. it can finalize blocks on its own and so does not need peers
-// to make progress. Uses the same local-validator membership test as the signing
-// path (Validators.HasAddress on the private validator's address), so a
+func (cs *State) setPrivValidatorPubKey(pubKey crypto.PubKey) {
+	cs.privValidatorPubKey = pubKey
+	if pubKey == nil {
+		cs.privValidatorAddr.Store(nil)
+		return
+	}
+	addr := pubKey.Address()
+	cs.privValidatorAddr.Store(&addr)
+}
+
+// isLocalSoleValidator reports whether this node is the only validator in vals,
+// i.e. it can finalize blocks on its own and so does not need peers to make
+// progress. Uses the same local-validator membership test as the signing path
+// (Validators.HasAddress on the private validator's address), so a
 // non-validator full node always returns false.
-func (cs *State) isLocalSoleValidator() bool {
-	cs.mtx.RLock()
-	defer cs.mtx.RUnlock()
-	if cs.privValidatorPubKey == nil || cs.Validators == nil {
+//
+// It does not take cs.mtx, so RPC Status stays responsive while the consensus
+// state is busy.
+func (cs *State) isLocalSoleValidator(vals *types.ValidatorSet) bool {
+	addr := cs.privValidatorAddr.Load()
+	if addr == nil || vals == nil {
 		return false
 	}
-	return cs.Validators.Size() == 1 && cs.Validators.HasAddress(cs.privValidatorPubKey.Address())
+	return vals.Size() == 1 && vals.HasAddress(*addr)
 }
 
 // look back to check existence of the node's consensus votes before joining consensus

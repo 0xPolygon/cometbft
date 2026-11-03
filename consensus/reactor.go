@@ -454,12 +454,10 @@ func (conR *Reactor) IsBehind() bool {
 func (conR *Reactor) isBehindRaw() bool {
 	peerHeights := collectPeerHeights(conR.Switch.Peers().List())
 
-	// Sole-validator status is read live from consensus state on every call, so it
-	// reflects validator-set changes this node has committed into local round state
-	// without any cached value to update. (A node partitioned before a set change
-	// can't observe the other side's update, but that only makes it report behind,
-	// which is correct.)
-	return conR.evaluateBehind(conR.getRoundState().Height, peerHeights, conR.conS.isLocalSoleValidator())
+	// The validator set comes from the reactor's round-state copy and the local
+	// address from an atomic cache, so this path never takes cs.mtx.
+	rs := conR.getRoundState()
+	return conR.evaluateBehind(rs.Height, peerHeights, conR.conS.isLocalSoleValidator(rs.Validators))
 }
 
 // collectPeerHeights returns the gossiped consensus height of every peer that
