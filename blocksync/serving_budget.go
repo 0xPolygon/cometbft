@@ -70,7 +70,7 @@ import (
 // be served not at all while the budget is spent. What it provides is that
 // the total is a number chosen in config rather than one set by demand.
 
-// ReactorOption adjusts optional Reactor behaviour. It exists so serving
+// ReactorOption adjusts optional Reactor behavior. It exists so serving
 // limits can be supplied without changing NewReactor/NewReactorWithAddr's
 // signatures, which are exported and which downstream callers compile
 // against — a reactor constructed without any option keeps

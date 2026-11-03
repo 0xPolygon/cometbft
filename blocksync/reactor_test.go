@@ -338,7 +338,7 @@ func TestRespondToPeer_ExactCapReconnectDoesNotResetWindow(t *testing.T) {
 
 	// Disconnect and reconnect with the same identity while sitting exactly
 	// at the cap, without ever having sent an over-limit request.
-	pair.reactor.Reactor.RemovePeer(peer, nil)
+	pair.reactor.RemovePeer(peer, nil)
 
 	queued := pair.reactor.Reactor.respondToPeer(msg, peer)
 	require.False(t, queued, "a peer that used its full window before disconnecting must not get a fresh window on reconnect")
@@ -442,14 +442,14 @@ func TestAllowBlockRequest_SubnetBanPreventsPeerStateGrowth(t *testing.T) {
 	queued := pair.reactor.Reactor.respondToPeer(msg, banningPeer)
 	require.False(t, queued, "the subnet should now be banned")
 
-	windowsBefore, _ := pair.reactor.Reactor.reqLimiter.sizes()
+	windowsBefore, _ := pair.reactor.reqLimiter.sizes()
 
 	freshPeer := p2pmock.NewPeer(net.ParseIP("203.0.113.200"))
 	defer freshPeer.Stop() //nolint:errcheck
 	queued = pair.reactor.Reactor.respondToPeer(msg, freshPeer)
 	require.False(t, queued, "a fresh identity inside an already-banned subnet must still be denied")
 
-	windowsAfter, _ := pair.reactor.Reactor.reqLimiter.sizes()
+	windowsAfter, _ := pair.reactor.reqLimiter.sizes()
 	require.Equal(t, windowsBefore, windowsAfter,
 		"the subnet-ban precheck must stop the peer limiter from recording a window entry for a request already doomed by the subnet ban")
 }
@@ -481,7 +481,7 @@ func TestRespondToPeer_BanSurvivesReconnect(t *testing.T) {
 
 	// Simulate the peer disconnecting and reconnecting with the same p2p.ID
 	// (RemovePeer is exactly what the p2p Switch calls on disconnect).
-	pair.reactor.Reactor.RemovePeer(peer, nil)
+	pair.reactor.RemovePeer(peer, nil)
 
 	queued = pair.reactor.Reactor.respondToPeer(msg, peer)
 	require.False(t, queued, "a banned peer must stay denied after reconnecting with the same identity")
