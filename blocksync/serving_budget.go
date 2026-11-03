@@ -70,7 +70,7 @@ import (
 // be served not at all while the budget is spent. What it provides is that
 // the total is a number chosen in config rather than one set by demand.
 
-// ReactorOption adjusts optional Reactor behaviour. It exists so serving
+// ReactorOption adjusts optional Reactor behavior. It exists so serving
 // limits can be supplied without changing NewReactor/NewReactorWithAddr's
 // signatures, which are exported and which downstream callers compile
 // against — a reactor constructed without any option keeps
@@ -444,7 +444,8 @@ func (s *servingBudget) globalAvailable() float64 {
 
 // servingReservation is the bytes one in-flight response has charged.
 // respondToPeer defers release, so each of its return paths gives back
-// exactly what it took without having to know which path it is on.
+// exactly what it took without having to know which path it is on, unless it
+// commits first to keep the charge.
 type servingReservation struct {
 	budget *servingBudget
 	id     p2p.ID
@@ -453,23 +454,16 @@ type servingReservation struct {
 	held   float64
 }
 
-// settle replaces the admitted estimate with the response's real size,
-// reporting whether the response may still be sent.
-//
-// An over-estimate is refunded and always succeeds. An under-estimate has to
-// acquire the difference like any other admission, and can be refused: a
-// budget cannot un-send bytes, so the only place a ceiling can actually be
-// enforced is before the send. Charging the excess afterwards and letting the
-// bucket go negative would bound nothing — responses already admitted on a
-// 128 KiB estimate would all have gone out, so enough concurrent oversized
-// responses could exceed the configured burst before any debt registered.
+// settle replaces the admitted estimate with a size known before loading,
+// reporting whether the response may still be prepared. An under-estimate has
+// to acquire the difference and can be refused, which keeps an unaffordable
+// block from being loaded at all. Sizes only known after the load go to charge.
 func (r *servingReservation) settle(actual float64) bool {
 	if r.budget == nil {
 		return true
 	}
 	if actual <= r.held {
-		r.budget.settle(r.id, r.addr, r.subnet, actual-r.held)
-		r.held = actual
+		r.charge(actual)
 		return true
 	}
 	if !r.budget.reserve(r.id, r.addr, r.subnet, actual-r.held) {
@@ -477,6 +471,17 @@ func (r *servingReservation) settle(actual float64) bool {
 	}
 	r.held = actual
 	return true
+}
+
+// charge replaces what is held with a loaded response's real size, refunding
+// an over-reservation and carrying a shortfall as debt. It cannot refuse: the
+// work is already done, and refusing would leave it unpaid.
+func (r *servingReservation) charge(actual float64) {
+	if r.budget == nil {
+		return
+	}
+	r.budget.settle(r.id, r.addr, r.subnet, actual-r.held)
+	r.held = actual
 }
 
 // commit keeps the charge: the response has been handed to the transport.

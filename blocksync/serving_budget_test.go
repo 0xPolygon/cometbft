@@ -228,6 +228,15 @@ func TestServingReservationLifecycle(t *testing.T) {
 		assert.InDelta(t, 1000.0, s.globalAvailable(), 1.0, "releases what it actually held")
 	})
 
+	t.Run("charge carries a shortfall as debt and release gives it back", func(t *testing.T) {
+		s := newServingBudget(ServingConfig{Rate: 1000, Burst: 1000})
+		r := newRes(s)
+		r.charge(1500)
+		assert.InDelta(t, -500.0, s.globalAvailable(), 1.0, "charged past the burst")
+		r.release()
+		assert.InDelta(t, 1000.0, s.globalAvailable(), 1.0, "releases what it actually held")
+	})
+
 	t.Run("an exempt reservation holds nothing", func(t *testing.T) {
 		r := &servingReservation{}
 		require.True(t, r.settle(1<<30), "an exempt reservation always settles")
