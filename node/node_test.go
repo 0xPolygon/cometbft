@@ -37,6 +37,7 @@ import (
 func TestNodeStartStop(t *testing.T) {
 	config := test.ResetTestRoot("node_node_test")
 	defer os.RemoveAll(config.RootDir)
+	config.RPC.GRPCListenAddress = ""
 
 	// create & start node
 	n, err := DefaultNewNode(config, log.TestingLogger())
@@ -113,6 +114,7 @@ func TestCompanionInitialHeightSetup(t *testing.T) {
 func TestNodeDelayedStart(t *testing.T) {
 	config := test.ResetTestRoot("node_delayed_start_test")
 	defer os.RemoveAll(config.RootDir)
+	config.RPC.GRPCListenAddress = ""
 	now := cmttime.Now()
 
 	// create & start node
@@ -151,6 +153,7 @@ func TestNodeSetAppVersion(t *testing.T) {
 func TestPprofServer(t *testing.T) {
 	config := test.ResetTestRoot("node_pprof_test")
 	defer os.RemoveAll(config.RootDir)
+	config.RPC.GRPCListenAddress = ""
 	config.RPC.PprofListenAddress = testFreeAddr(t)
 
 	// should not work yet
@@ -436,6 +439,7 @@ func TestMaxProposalBlockSize(t *testing.T) {
 func TestNodeNewNodeCustomReactors(t *testing.T) {
 	config := test.ResetTestRoot("node_new_node_custom_reactors_test")
 	defer os.RemoveAll(config.RootDir)
+	config.RPC.GRPCListenAddress = ""
 
 	cr := p2pmock.NewReactor()
 	cr.Channels = []*conn.ChannelDescriptor{

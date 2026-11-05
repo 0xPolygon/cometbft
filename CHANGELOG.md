@@ -1,18 +1,35 @@
 # CHANGELOG
 
-## UNRELEASED
+## v0.38.25
 
-### DEPENDENCIES
+*July 27, 2026*
 
 ### BUG FIXES
 
+- `[blocksync]` tolerate late BlockResponse from honest peers after switching to consensus
+  ([\#5959](https://github.com/cometbft/cometbft/pull/5959))
+- `[consensus]` Fix `double_sign_check_height = 1` performing no double-sign
+  checks due to off-by-one error in loop condition (`i < N` should be
+  `i <= N`). The value `1` now correctly checks the previous block as intended.
+  ([\#5668](https://github.com/cometbft/cometbft/pull/5668))
+- `[mempool]` fix setRecheckFull/setDone race causing spurious ErrRecheckFull.
+  ([\#5837](https://github.com/cometbft/cometbft/pull/5837))
+- `[consensus]` release cs.mtx before sending to statsMsgQueue
+  ([\#5813](https://github.com/cometbft/cometbft/pull/5813))
+- `[mempool]` truncate proto field number to int32 in filter's ReadTag
+  ([\#5948](https://github.com/cometbft/cometbft/pull/5948))
+
 ### IMPROVEMENTS
+
+- `[blocksync]` validate blocksync response sender and signature count
+  ([\#5860](https://github.com/cometbft/cometbft/pull/5860))
+- `[mempool]` Implement `MsgBytesFilter` in Reactor to prevent heap amplification attack
+  ([\#5946](https://github.com/cometbft/cometbft/pull/5946))
 
 ### FEATURES
 
-### STATE-BREAKING
-
-### API-BREAKING
+- `[config]` Add EventBusBufferCapacity setting.
+  ([\#5849](https://github.com/cometbft/cometbft/pull/5849))
 
 ## v0.38.23
 
