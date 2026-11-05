@@ -1682,6 +1682,20 @@ func TestVerifyCommitExtended(t *testing.T) {
 		assert.Contains(t, err.Error(), "invalid vote extension signature (val #1)")
 	})
 
+	t.Run("invalid non-replay-protected extension signature", func(t *testing.T) {
+		blockID := makeBlockIDRandom()
+		voteSet, valSet, vals := randVoteSet(height, round, cmtproto.PrecommitType, 4, 10, true)
+		extCommit, err := MakeExtCommit(blockID, height, round, voteSet, vals, time.Now(), true)
+		require.NoError(t, err)
+		require.NotEmpty(t, extCommit.ExtendedSignatures[2].NonRpExtensionSignature)
+		extCommit.ExtendedSignatures[2].NonRpExtensionSignature = []byte("invalid")
+
+		err = valSet.VerifyCommitExtended(chainID, blockID, height, extCommit)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid vote extension signature (val #2)")
+	})
+
 	t.Run("nil extended commit", func(t *testing.T) {
 		// ACT
 		err := (&ValidatorSet{}).VerifyCommitExtended(chainID, makeBlockIDRandom(), height, nil)
