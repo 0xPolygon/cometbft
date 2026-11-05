@@ -606,8 +606,10 @@ type CommitSig struct {
 }
 
 func MaxCommitBytes(valCount int) int64 {
-	// From the repeated commit sig field
+	// HV2: kept at 2 rather than upstream's 3 (sized for ML-DSA signatures)
+	// so MaxDataBytes, and thus block capacity, doesn't change.
 	var protoEncodingOverhead int64 = 2
+	// From the repeated commit sig field
 	return MaxCommitOverheadBytes + ((MaxCommitSigBytes + protoEncodingOverhead) * int64(valCount))
 }
 
