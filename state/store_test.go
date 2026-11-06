@@ -1,6 +1,7 @@
 package state_test
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"testing"
@@ -616,4 +617,89 @@ func TestIntConversion(t *testing.T) {
 	x := int64(10)
 	b := sm.Int64ToBytes(x)
 	require.Equal(t, x, sm.Int64FromBytes(b))
+}
+
+func TestPruneABCIResponsesPersistsRetainHeight(t *testing.T) {
+	stateStore := sm.NewStoreForTesting(dbm.NewMemDB())
+	resp := &abci.ResponseFinalizeBlock{AppHash: make([]byte, 1)}
+	for h := int64(1); h <= 10; h++ {
+		require.NoError(t, stateStore.SaveFinalizeBlockResponse(h, resp))
+	}
+
+	pruned, retainHeight, err := stateStore.PruneABCIResponses(5, false)
+	require.NoError(t, err)
+	require.Equal(t, int64(4), pruned)
+	require.Equal(t, int64(5), retainHeight)
+
+	stored, err := stateStore.GetLastABCIResponsesRetainHeight()
+	require.NoError(t, err)
+	require.Equal(t, int64(5), stored)
+
+	// A key below the stored retain height is only reachable by the full
+	// scan, so it surviving the next run proves the scan was skipped.
+	require.NoError(t, stateStore.SaveFinalizeBlockResponse(2, resp))
+
+	pruned, _, err = stateStore.PruneABCIResponses(7, false)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), pruned)
+
+	_, err = stateStore.LoadFinalizeBlockResponse(2)
+	require.NoError(t, err)
+	for h := int64(5); h < 7; h++ {
+		_, err = stateStore.LoadFinalizeBlockResponse(h)
+		require.Error(t, err)
+	}
+	stored, err = stateStore.GetLastABCIResponsesRetainHeight()
+	require.NoError(t, err)
+	require.Equal(t, int64(7), stored)
+}
+
+// failingSetSyncDB fails every SetSync, which is how the store persists the
+// last ABCI responses retain height.
+type failingSetSyncDB struct {
+	dbm.DB
+}
+
+func (failingSetSyncDB) SetSync([]byte, []byte) error {
+	return errors.New("set sync failed")
+}
+
+func TestPruneABCIResponsesErrors(t *testing.T) {
+	resp := &abci.ResponseFinalizeBlock{AppHash: make([]byte, 1)}
+	retainKey := []byte("lastABCIResponsesRetainHeight")
+
+	t.Run("no stored responses", func(t *testing.T) {
+		stateStore := sm.NewStoreForTesting(dbm.NewMemDB())
+		pruned, retainHeight, err := stateStore.PruneABCIResponses(5, false)
+		require.Error(t, err)
+		require.Zero(t, pruned)
+		require.Zero(t, retainHeight)
+	})
+
+	t.Run("invalid stored retain height", func(t *testing.T) {
+		memDB := dbm.NewMemDB()
+		require.NoError(t, memDB.Set(retainKey, sm.Int64ToBytes(-1)))
+		_, _, err := sm.NewStoreForTesting(memDB).PruneABCIResponses(5, false)
+		require.ErrorIs(t, err, sm.ErrInvalidHeightValue)
+	})
+
+	t.Run("persisting retain height fails", func(t *testing.T) {
+		memDB := dbm.NewMemDB()
+		seedStore := sm.NewStoreForTesting(memDB)
+		for h := int64(1); h <= 10; h++ {
+			require.NoError(t, seedStore.SaveFinalizeBlockResponse(h, resp))
+		}
+		pruned, retainHeight, err := sm.NewStoreForTesting(failingSetSyncDB{memDB}).PruneABCIResponses(5, false)
+		require.Error(t, err)
+		require.Equal(t, int64(4), pruned)
+		require.Equal(t, int64(5), retainHeight)
+	})
+
+	t.Run("nothing to prune skips persisting", func(t *testing.T) {
+		memDB := dbm.NewMemDB()
+		require.NoError(t, memDB.Set(retainKey, sm.Int64ToBytes(5)))
+		pruned, _, err := sm.NewStoreForTesting(failingSetSyncDB{memDB}).PruneABCIResponses(5, false)
+		require.NoError(t, err)
+		require.Zero(t, pruned)
+	})
 }
