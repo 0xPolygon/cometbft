@@ -467,20 +467,10 @@ func (store dbStore) PruneABCIResponses(targetRetainHeight int64, forceCompact b
 	if store.DiscardABCIResponses {
 		return 0, 0, nil
 	}
-	lastRetainHeight, err := store.getLastABCIResponsesRetainHeight()
+	lastRetainHeight, err := store.abciResponsesPruneStart()
 	if err != nil {
-		return 0, 0, fmt.Errorf("failed to look up last ABCI responses retain height: %w", err)
+		return 0, 0, err
 	}
-	if lastRetainHeight == 0 {
-		lastRetainHeight = 1
-	}
-
-	smallestFound, err := db.FindSmallestValueWithBrokenKeys(store.db, []byte("abciResponsesKey:"))
-	if err != nil {
-		return 0, lastRetainHeight, err
-	}
-
-	lastRetainHeight = int64(smallestFound)
 
 	batch := store.db.NewBatch()
 	defer batch.Close()
@@ -515,6 +505,13 @@ func (store dbStore) PruneABCIResponses(targetRetainHeight int64, forceCompact b
 	}
 	if err = batch.WriteSync(); err != nil {
 		return pruned + batchPruned, targetRetainHeight, err
+	}
+	// Persist on every run: a steady-state run prunes fewer heights than one
+	// batch, so relying on the in-loop save leaves the stored height unset.
+	if targetRetainHeight > lastRetainHeight {
+		if err := store.setLastABCIResponsesRetainHeight(targetRetainHeight); err != nil {
+			return pruned + batchPruned, targetRetainHeight, fmt.Errorf("failed to set last ABCI responses retain height: %w", err)
+		}
 	}
 
 	state, err := store.Load()
@@ -759,6 +756,24 @@ func (store dbStore) getLastABCIResponsesRetainHeight() (int64, error) {
 		return 0, ErrInvalidHeightValue
 	}
 	return height, nil
+}
+
+// abciResponsesPruneStart returns the first height left to prune. The scan
+// reads every stored ABCI response, so it only runs when no retain height has
+// been persisted yet (e.g. pruning just enabled).
+func (store dbStore) abciResponsesPruneStart() (int64, error) {
+	lastRetainHeight, err := store.getLastABCIResponsesRetainHeight()
+	if err != nil {
+		return 0, fmt.Errorf("failed to look up last ABCI responses retain height: %w", err)
+	}
+	if lastRetainHeight > 0 {
+		return lastRetainHeight, nil
+	}
+	smallestFound, err := db.FindSmallestValueWithBrokenKeys(store.db, []byte("abciResponsesKey:"))
+	if err != nil {
+		return 0, err
+	}
+	return int64(smallestFound), nil
 }
 
 func (store dbStore) setLastABCIResponsesRetainHeight(height int64) error {
