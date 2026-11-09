@@ -79,7 +79,8 @@ type Reactor struct {
 	reqLimiter *requestLimiter[p2p.ID]
 	ipLimiter  *requestLimiter[string]
 
-	servingBudget *servingBudget
+	servingBudget  *servingBudget
+	deferredBlocks *deferredBlocks
 }
 
 // NewReactor returns new reactor instance.
@@ -166,6 +167,9 @@ func (bcR *Reactor) OnStart() error {
 			bcR.poolRoutine(false)
 		}()
 	}
+	if policy, ok := bcR.Switch.ServingPolicy().(servebudget.RetryPolicy); ok {
+		bcR.deferredBlocks = newDeferredBlocks(bcR, policy)
+	}
 
 	// Started last: BaseService.Start doesn't call OnStop when OnStart
 	// returns an error, so any goroutine started before a fallible step
@@ -198,6 +202,9 @@ func (bcR *Reactor) SwitchToBlockSync(state sm.State) error {
 
 // OnStop implements service.Service.
 func (bcR *Reactor) OnStop() {
+	if bcR.deferredBlocks != nil {
+		bcR.deferredBlocks.stop()
+	}
 	if bcR.blockSync {
 		if err := bcR.pool.Stop(); err != nil {
 			bcR.Logger.Error("Error stopping pool", "err", err)
@@ -241,6 +248,9 @@ func (bcR *Reactor) AddPeer(peer p2p.Peer) {
 // deliberately doesn't touch reqLimiter/ipLimiter — see requestLimiter's
 // doc comment for why that cleanup is time-based, not disconnect-based.
 func (bcR *Reactor) RemovePeer(peer p2p.Peer, _ interface{}) {
+	if bcR.deferredBlocks != nil {
+		bcR.deferredBlocks.remove(peer)
+	}
 	bcR.pool.RemovePeer(peer.ID())
 }
 
@@ -251,11 +261,16 @@ func (bcR *Reactor) respondToPeer(msg *bcproto.BlockRequest, src p2p.Peer) (queu
 	if !admitted {
 		return false
 	}
-	defer func() { p2p.FinishServing(lease) }()
-	exempt := exemptFromRateLimit(src, bcR.store.Height())
 	if !allowBlockRequest(bcR, src, msg) {
+		p2p.FinishServing(lease)
 		return false
 	}
+	return bcR.serveBlock(msg, src, lease)
+}
+
+func (bcR *Reactor) serveBlock(msg *bcproto.BlockRequest, src p2p.Peer, lease servebudget.Lease) (queued bool) {
+	defer func() { p2p.FinishServing(lease) }()
+	exempt := exemptFromRateLimit(src, bcR.store.Height())
 	if blockQueueFull(src) {
 		bcR.sendQueueFullDrops.Add(1)
 		return false
@@ -312,7 +327,7 @@ func (bcR *Reactor) Receive(e p2p.Envelope) {
 
 	switch msg := e.Message.(type) {
 	case *bcproto.BlockRequest:
-		bcR.respondToPeer(msg, e.Src)
+		bcR.receiveBlockRequest(msg, e.Src)
 	case *bcproto.BlockResponse:
 		bi, err := types.BlockFromProto(msg.Block)
 		if err != nil {

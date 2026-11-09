@@ -32,6 +32,13 @@ type Policy interface {
 	Observe(peerID string, evidence Evidence)
 }
 
+// RetryPolicy supports deferred blocksync requests. Retry rechecks admission
+// without recording another peer request or refusal as reputation evidence.
+type RetryPolicy interface {
+	Policy
+	Retry(peerID string, request Request) (Lease, bool)
+}
+
 // Lease spans the store read through transport completion. Prepare reserves actual
 // encoded bytes before queueing. Finish is idempotent; true means a local flush,
 // never remote receipt. Failed work retains its work charge.

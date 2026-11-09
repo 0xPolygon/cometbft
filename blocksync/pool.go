@@ -34,14 +34,14 @@ const (
 	maxPendingRequestsPerPeer = 20
 	requestRetrySeconds       = 30
 
-	// Minimum recv rate to ensure we're receiving blocks from a peer fast
-	// enough. If a peer is not sending us data at at least that rate, we
-	// consider them to have timedout and we disconnect.
+	// Minimum byte rate for peers that do not meet the block-progress floor.
 	//
 	// Based on the experiments with [Osmosis](https://osmosis.zone/), the
 	// minimum rate could be as high as 500 KB/s. However, we're setting it to
 	// 128 KB/s for now to be conservative.
 	minRecvRate = 128 * 1024 // 128 KB/s
+	// Small blocks can advance sync without reaching the byte-rate floor.
+	minRecvBlockRate = 1
 
 	// peerConnWait is the time that must have elapsed since the pool routine
 	// was created before we start making requests. This is to give the peer
@@ -163,7 +163,7 @@ func (pool *BlockPool) removeTimedoutPeers() {
 		if !peer.didTimeout && peer.numPending > 0 {
 			curRate := peer.recvMonitor.Status().CurRate
 			// curRate can be 0 on start
-			if curRate != 0 && curRate < minRecvRate {
+			if curRate != 0 && curRate < minRecvRate && peer.blockMonitor.Status().CurRate < minRecvBlockRate {
 				err := errors.New("peer is not sending us data fast enough")
 				pool.sendError(err, peer.id)
 				pool.Logger.Error("SendTimeout", "peer", peer.id,
@@ -572,14 +572,15 @@ func (pool *BlockPool) debug() string {
 //-------------------------------------
 
 type bpPeer struct {
-	didTimeout  bool
-	curRate     int64
-	numPending  int32
-	height      int64
-	base        int64
-	pool        *BlockPool
-	id          p2p.ID
-	recvMonitor *flow.Monitor
+	didTimeout   bool
+	curRate      int64
+	numPending   int32
+	height       int64
+	base         int64
+	pool         *BlockPool
+	id           p2p.ID
+	recvMonitor  *flow.Monitor
+	blockMonitor *flow.Monitor
 
 	timeout *time.Timer
 
@@ -606,6 +607,8 @@ func (peer *bpPeer) resetMonitor() {
 	peer.recvMonitor = flow.New(time.Second, time.Second*40)
 	initialValue := float64(minRecvRate) * math.E
 	peer.recvMonitor.SetREMA(initialValue)
+	peer.blockMonitor = flow.New(time.Second, time.Second*40)
+	peer.blockMonitor.SetREMA(float64(minRecvBlockRate) * math.E)
 }
 
 func (peer *bpPeer) resetTimeout() {
@@ -630,6 +633,7 @@ func (peer *bpPeer) decrPending(recvSize int) {
 		peer.timeout.Stop()
 	} else {
 		peer.recvMonitor.Update(recvSize)
+		peer.blockMonitor.Update(1)
 		peer.resetTimeout()
 	}
 }
