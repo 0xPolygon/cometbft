@@ -456,12 +456,10 @@ func (conR *Reactor) IsBehind() bool {
 func (conR *Reactor) isBehindRaw() bool {
 	peerHeights := collectPeerHeights(conR.Switch.Peers().List())
 
-	// Sole-validator status is read live from consensus state on every call, so it
-	// reflects validator-set changes this node has committed into local round state
-	// without any cached value to update. (A node partitioned before a set change
-	// can't observe the other side's update, but that only makes it report behind,
-	// which is correct.)
-	return conR.evaluateBehind(conR.getRoundState().Height, peerHeights, conR.conS.isLocalSoleValidator())
+	// The validator set comes from the reactor's round-state copy and the local
+	// address from an atomic cache, so this path never takes cs.mtx.
+	rs := conR.getRoundState()
+	return conR.evaluateBehind(rs.Height, peerHeights, conR.conS.isLocalSoleValidator(rs.Validators))
 }
 
 // collectPeerHeights returns the gossiped consensus height of every peer that
@@ -721,13 +719,8 @@ OUTER_LOOP:
 
 			// if we never received the commit message from the peer, the block parts wont be initialized
 			if prs.ProposalBlockParts == nil {
-				blockMeta := conR.loadCatchupMeta(peer, prs.Height)
-				if blockMeta == nil {
-					heightLogger.Error("Failed to load block meta",
-						"blockstoreBase", blockStoreBase, "blockstoreHeight", conR.conS.blockStore.Height())
+				if !conR.initCatchupParts(heightLogger, peer, ps, prs.Height) {
 					time.Sleep(conR.conS.config.PeerGossipSleepDuration)
-				} else {
-					ps.InitProposalBlockParts(blockMeta.BlockID.PartSetHeader)
 				}
 				// continue the loop since prs is a copy and not effected by this initialization
 				continue OUTER_LOOP
@@ -866,7 +859,7 @@ OUTER_LOOP:
 		// Special catchup logic.
 		// If peer is lagging by height 1, send LastCommit.
 		if prs.Height != 0 && rs.Height == prs.Height+1 {
-			if conR.sendCatchupVote(peer, ps, prs.Height, func() types.VoteSetReader { return rs.LastCommit }) {
+			if conR.sendLastCommit(peer, ps, rs.LastCommit) {
 				logger.Debug("Picked rs.LastCommit to send", "height", prs.Height)
 				continue OUTER_LOOP
 			}

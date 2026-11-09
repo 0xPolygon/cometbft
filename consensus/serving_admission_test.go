@@ -29,7 +29,9 @@ func TestNativeServingBeforeLoad(t *testing.T) {
 	r := &Reactor{}
 	r.BaseReactor = *p2p.NewBaseReactor("test", r)
 	r.SetSwitch(sw)
-	require.Nil(t, r.loadCatchupMeta(servingPeer{}, 1))
+	meta, admitted := r.loadCatchupMeta(servingPeer{}, 1)
+	require.Nil(t, meta)
+	require.False(t, admitted)
 	require.False(t, r.sendCatchupVote(servingPeer{}, nil, 1, func() types.VoteSetReader { t.Fatal("load before admission"); return nil }))
 	require.Positive(t, policy.calls)
 }

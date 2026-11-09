@@ -11,13 +11,25 @@ import (
 	"github.com/cometbft/cometbft/types"
 )
 
-func (r *Reactor) loadCatchupMeta(peer p2p.Peer, height int64) *types.BlockMeta {
+func (r *Reactor) loadCatchupMeta(peer p2p.Peer, height int64) (*types.BlockMeta, bool) {
 	lease, ok := r.Switch.AdmitServing(peer, servebudget.Request{Family: servebudget.Catchup, Height: uint64(height), MaxBytes: 4096})
 	if !ok {
-		return nil
+		return nil, false
 	}
 	defer p2p.FinishServing(lease)
-	return r.conS.blockStore.LoadBlockMeta(height)
+	return r.conS.blockStore.LoadBlockMeta(height), true
+}
+
+func (r *Reactor) initCatchupParts(logger log.Logger, peer p2p.Peer, ps *PeerState, height int64) bool {
+	meta, admitted := r.loadCatchupMeta(peer, height)
+	if meta == nil {
+		if admitted {
+			logger.Error("Failed to load block meta", "blockstoreBase", r.conS.blockStore.Base(), "blockstoreHeight", r.conS.blockStore.Height())
+		}
+		return false
+	}
+	ps.InitProposalBlockParts(meta.BlockID.PartSetHeader)
+	return true
 }
 
 func (r *Reactor) loadCatchupCommit(height int64) types.VoteSetReader {
@@ -36,6 +48,25 @@ func (r *Reactor) loadCatchupCommit(height int64) types.VoteSetReader {
 		return nil
 	}
 	return c.WrappedExtendedCommit()
+}
+
+func (r *Reactor) sendLastCommit(peer p2p.Peer, ps *PeerState, votes types.VoteSetReader) bool {
+	if votes == nil {
+		return false
+	}
+	vote, ok := ps.PickVoteToSend(votes)
+	if !ok {
+		return false
+	}
+	lease, admitted := r.Switch.AdmitServing(peer, servebudget.Request{Family: servebudget.Catchup, Height: uint64(vote.Height), Format: 1, MaxBytes: uint64(maxMsgSize)})
+	if !admitted {
+		return false
+	}
+	sent := p2p.SendServing(peer, lease, p2p.Envelope{ChannelID: VoteChannel, Message: &cmtcons.Vote{Vote: vote.ToProto()}})
+	if sent {
+		ps.SetHasVote(vote)
+	}
+	return sent
 }
 
 func (r *Reactor) sendCatchupVote(peer p2p.Peer, ps *PeerState, height int64, load func() types.VoteSetReader) bool {
