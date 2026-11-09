@@ -19,6 +19,18 @@ func (r *Reactor) loadServingResponse(height int64) *bcproto.BlockResponse {
 	}
 	return &bcproto.BlockResponse{Block: block, ExtCommit: commit}
 }
+
+func (r *Reactor) sendServingResponse(src p2p.Peer, lease servebudget.Lease, res *servingReservation, response *bcproto.BlockResponse) bool {
+	served := float64(response.Block.Size() + response.ExtCommit.Size() + blockResponseOverheadBytes)
+	res.charge(served)
+	if !p2p.SendServing(src, lease, p2p.Envelope{ChannelID: BlocksyncChannel, Message: response}) {
+		return false
+	}
+	res.commit()
+	r.metrics.BlockBytesServed.Add(served)
+	return true
+}
+
 func (r *Reactor) observeInvalidServing(e p2p.Envelope) {
 	reason := servebudget.InvalidResponse
 	if _, ok := e.Message.(*bcproto.BlockRequest); ok {

@@ -261,9 +261,7 @@ func (bcR *Reactor) respondToPeer(msg *bcproto.BlockRequest, src p2p.Peer) (queu
 		return false
 	}
 
-	// Admission precedes the store read and marshal below on purpose: a
-	// response we cannot afford must not first cost us the work of preparing
-	// it. release is deferred so every return path gives back what it charged.
+	// Reserve before the store read and encoding.
 	res, admitted := bcR.reserveServing(src, exempt || bcR.Switch.ServingPolicy() != nil)
 	if !admitted {
 		return false
@@ -274,20 +272,13 @@ func (bcR *Reactor) respondToPeer(msg *bcproto.BlockRequest, src p2p.Peer) (queu
 	if meta == nil {
 		return bcR.sendNoBlockResponse(src, msg.Height)
 	}
-	// Reserve the stored block size so a refused request costs only the meta
-	// read. The extended commit has no stored size, so it is charged after the
-	// load as debt that refuses the peer's next request until refill repays it.
-	// A connection's requests are handled one at a time, so a peer overshoots
-	// by at most one extended commit, and the global layer by at most one per
-	// connected peer. Those bytes were sent, so they count there too.
+	// The extended commit has no stored size. Charge it as debt after loading;
+	// serialized per-connection reads bound overshoot to one commit per peer.
 	if !res.settle(float64(meta.BlockSize + blockResponseOverheadBytes)) {
 		bcR.metrics.ServingBudgetDrops.Add(1)
 		return false
 	}
 
-	// Load the block already in proto form to skip the BlockFromProto+ToProto
-	// round-trip respondToPeer used to pay on every call (cherry-picked from
-	// upstream cometbft#5761).
 	response := bcR.loadServingResponse(msg.Height)
 	if response == nil {
 		return false
@@ -295,19 +286,9 @@ func (bcR *Reactor) respondToPeer(msg *bcproto.BlockRequest, src p2p.Peer) (queu
 	if response.Block == nil {
 		return bcR.sendNoBlockResponse(src, msg.Height)
 	}
-	served := float64(response.Block.Size() + response.ExtCommit.Size() + blockResponseOverheadBytes)
-	res.charge(served)
-	sent := p2p.SendServing(src, lease, p2p.Envelope{
-		ChannelID: BlocksyncChannel,
-		Message:   response,
-	})
+	queued = bcR.sendServingResponse(src, lease, res, response)
 	lease = nil
-	if !sent {
-		return false
-	}
-	res.commit()
-	bcR.metrics.BlockBytesServed.Add(served)
-	return true
+	return queued
 }
 
 func (bcR *Reactor) sendNoBlockResponse(src p2p.Peer, height int64) bool {
