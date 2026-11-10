@@ -22,6 +22,7 @@ func (p *deferredTestPolicy) Admit(string, servebudget.Request) (servebudget.Lea
 	p.initial.Add(1)
 	return nil, false
 }
+
 func (p *deferredTestPolicy) Retry(string, servebudget.Request) (servebudget.Lease, bool) {
 	p.retries.Add(1)
 	return nil, false
@@ -33,18 +34,18 @@ func TestDeferredBlockBounds(t *testing.T) {
 	d := newDeferredBlocks(&Reactor{}, policy)
 	t.Cleanup(d.stop)
 	peer := newBlockServingPeer(t, false)
-	require.True(t, d.enqueue(peer, 1))
+	require.True(t, d.enqueue(peer, 1, false))
 	for range 30 {
-		require.True(t, d.enqueue(peer, 1))
+		require.True(t, d.enqueue(peer, 1, false))
 	}
 	require.Eventually(t, func() bool { return policy.retries.Load() > 0 }, time.Second, time.Millisecond)
 	require.Equal(t, int64(1), policy.initial.Load())
 	for height := int64(2); height <= maxPendingRequestsPerPeer+1; height++ {
-		require.True(t, d.enqueue(peer, height))
+		require.True(t, d.enqueue(peer, height, false))
 	}
-	require.False(t, d.enqueue(peer, maxPendingRequestsPerPeer+2))
+	require.False(t, d.enqueue(peer, maxPendingRequestsPerPeer+2, false))
 	d.stop()
-	require.False(t, d.enqueue(peer, 100))
+	require.False(t, d.enqueue(peer, 100, false))
 	require.Zero(t, d.workers)
 }
 
@@ -61,14 +62,14 @@ func TestDeferredBlockReconnect(t *testing.T) {
 	t.Cleanup(d.stop)
 	old := newBlockServingPeer(t, false)
 	current := &sameIDPeer{blockServingPeer: newBlockServingPeer(t, false), id: old.ID()}
-	require.True(t, d.enqueue(old, 1))
+	require.True(t, d.enqueue(old, 1, false))
 	require.Eventually(t, func() bool { return policy.initial.Load() == 1 }, time.Second, time.Millisecond)
-	require.False(t, d.enqueue(current, 2))
+	require.False(t, d.enqueue(current, 2, false))
 	d.remove(old)
-	require.True(t, d.enqueue(current, 2))
+	require.True(t, d.enqueue(current, 2, false))
 	d.remove(old)
 	require.Eventually(t, func() bool { return policy.initial.Load() == 2 }, time.Second, time.Millisecond)
-	require.True(t, d.enqueue(current, 3))
+	require.True(t, d.enqueue(current, 3, false))
 	d.remove(current)
 	require.Eventually(t, func() bool {
 		d.mu.Lock()
@@ -82,9 +83,9 @@ func TestDeferredBlockWorkerLimit(t *testing.T) {
 	t.Cleanup(d.stop)
 	d.workers = maxDeferredPeers - 1
 	peer := newBlockServingPeer(t, false)
-	require.True(t, d.enqueue(peer, 1))
-	require.False(t, d.enqueue(newBlockServingPeer(t, false), 1))
-	require.True(t, d.enqueue(peer, 2))
+	require.True(t, d.enqueue(peer, 1, false))
+	require.False(t, d.enqueue(newBlockServingPeer(t, false), 1, false))
+	require.True(t, d.enqueue(peer, 2, false))
 	d.stop()
 	require.Equal(t, maxDeferredPeers-1, d.workers)
 }
@@ -105,7 +106,7 @@ func TestDeferredBlockCancellationReleasesAdmission(t *testing.T) {
 	policy := &cancelledAdmissionPolicy{entered: make(chan struct{}), release: make(chan struct{}), lease: &blockLease{}}
 	d := newDeferredBlocks(&Reactor{}, policy)
 	peer := newBlockServingPeer(t, false)
-	require.True(t, d.enqueue(peer, 1))
+	require.True(t, d.enqueue(peer, 1, false))
 	<-policy.entered
 	d.remove(peer)
 	close(policy.release)
@@ -121,6 +122,7 @@ func (p *selectiveBlockPolicy) Admit(id string, req servebudget.Request) (serveb
 	}
 	return nil, true
 }
+
 func (p *selectiveBlockPolicy) Retry(id string, req servebudget.Request) (servebudget.Lease, bool) {
 	if req.Height == 1 {
 		return p.deferredTestPolicy.Retry(id, req)
@@ -207,7 +209,7 @@ func TestDeferredBlockTransportBackpressure(t *testing.T) {
 	t.Cleanup(d.stop)
 	peer := &quietBlockPeer{blockServingPeer: newBlockServingPeer(t, false), quit: make(chan struct{})}
 	peer.full.Store(true)
-	require.True(t, d.enqueue(peer, 1))
+	require.True(t, d.enqueue(peer, 1, false))
 	require.Eventually(t, func() bool { return peer.checks.Load() > 0 }, time.Second, time.Millisecond)
 	require.Zero(t, policy.initial.Load())
 	peer.full.Store(false)

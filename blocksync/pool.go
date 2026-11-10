@@ -163,7 +163,7 @@ func (pool *BlockPool) removeTimedoutPeers() {
 		if !peer.didTimeout && peer.numPending > 0 {
 			curRate := peer.recvMonitor.Status().CurRate
 			// curRate can be 0 on start
-			if curRate != 0 && curRate < minRecvRate && peer.blockMonitor.Status().CurRate < minRecvBlockRate {
+			if !time.Now().Before(peer.deferredUntil) && curRate != 0 && curRate < minRecvRate && peer.blockMonitor.Status().CurRate < minRecvBlockRate {
 				err := errors.New("peer is not sending us data fast enough")
 				pool.sendError(err, peer.id)
 				pool.Logger.Error("SendTimeout", "peer", peer.id,
@@ -292,6 +292,9 @@ func (pool *BlockPool) RedoRequestFrom(height int64, peerID p2p.ID) {
 
 	if requester, ok := pool.requesters[height]; ok { // If we requested this block
 		if requester.didRequestFrom(peerID) { // From this specific peer
+			if peer := pool.peers[peerID]; peer != nil {
+				peer.clearDeferral(height)
+			}
 			requester.redo(peerID)
 		}
 	}
@@ -341,6 +344,11 @@ func (pool *BlockPool) AddBlock(peerID p2p.ID, block *types.Block, extCommit *ty
 		return pool.rejectResponse(err, peerID)
 	}
 
+	for _, id := range requester.requestedFrom() {
+		if source := pool.peers[id]; source != nil {
+			source.clearDeferral(block.Height)
+		}
+	}
 	atomic.AddInt32(&pool.numPending, -1)
 	peer := pool.peers[peerID]
 	if peer != nil {
@@ -582,7 +590,10 @@ type bpPeer struct {
 	recvMonitor  *flow.Monitor
 	blockMonitor *flow.Monitor
 
-	timeout *time.Timer
+	timeout       *time.Timer
+	timeoutAt     time.Time
+	deferredUntil time.Time
+	deferrals     map[int64]time.Time
 
 	logger log.Logger
 }
@@ -612,10 +623,15 @@ func (peer *bpPeer) resetMonitor() {
 }
 
 func (peer *bpPeer) resetTimeout() {
+	peer.refreshDeferrals()
+	peer.timeoutAt = time.Now().Add(peerTimeout)
+	if peer.deferredUntil.After(peer.timeoutAt) {
+		peer.timeoutAt = peer.deferredUntil
+	}
 	if peer.timeout == nil {
-		peer.timeout = time.AfterFunc(peerTimeout, peer.onTimeout)
+		peer.timeout = time.AfterFunc(time.Until(peer.timeoutAt), peer.onTimeout)
 	} else {
-		peer.timeout.Reset(peerTimeout)
+		peer.timeout.Reset(time.Until(peer.timeoutAt))
 	}
 }
 
@@ -631,6 +647,7 @@ func (peer *bpPeer) decrPending(recvSize int) {
 	peer.numPending--
 	if peer.numPending == 0 {
 		peer.timeout.Stop()
+		peer.deferredUntil = time.Time{}
 	} else {
 		peer.recvMonitor.Update(recvSize)
 		peer.blockMonitor.Update(1)
@@ -642,6 +659,13 @@ func (peer *bpPeer) onTimeout() {
 	peer.pool.mtx.Lock()
 	defer peer.pool.mtx.Unlock()
 
+	if peer.pool.peers[peer.id] != peer || peer.numPending == 0 {
+		return
+	}
+	if remaining := time.Until(peer.timeoutAt); remaining > 0 {
+		peer.timeout.Reset(remaining)
+		return
+	}
 	err := errors.New("peer did not send us anything")
 	peer.pool.sendError(err, peer.id)
 	peer.logger.Error("SendTimeout", "reason", err, "timeout", peerTimeout)
@@ -669,6 +693,8 @@ type bpRequester struct {
 
 	mtx          cmtsync.Mutex
 	peerID       p2p.ID
+	deferred     [2]time.Time
+	requestedAt  [2]time.Time
 	secondPeerID p2p.ID // alternative peer to request from (if close to pool's height)
 	gotBlockFrom p2p.ID
 	block        *types.Block
@@ -776,8 +802,12 @@ func (bpr *bpRequester) reset(peerID p2p.ID) (removedBlock bool) {
 
 	if bpr.peerID == peerID {
 		bpr.peerID = ""
-	} else {
+		bpr.deferred[0] = time.Time{}
+		bpr.requestedAt[0] = time.Time{}
+	} else if bpr.secondPeerID == peerID {
 		bpr.secondPeerID = ""
+		bpr.deferred[1] = time.Time{}
+		bpr.requestedAt[1] = time.Time{}
 	}
 
 	return removedBlock
@@ -814,6 +844,7 @@ PICK_PEER_LOOP:
 	}
 	bpr.mtx.Lock()
 	bpr.peerID = peer.id
+	bpr.requestedAt[0] = time.Now()
 	bpr.mtx.Unlock()
 
 	bpr.pool.sendRequest(bpr.height, peer.id)
@@ -834,6 +865,7 @@ func (bpr *bpRequester) pickSecondPeerAndSendRequest() (picked bool) {
 	if secondPeer != nil {
 		bpr.mtx.Lock()
 		bpr.secondPeerID = secondPeer.id
+		bpr.requestedAt[1] = time.Now()
 		bpr.mtx.Unlock()
 
 		bpr.pool.sendRequest(bpr.height, secondPeer.id)
@@ -879,6 +911,10 @@ OUTER_LOOP:
 				return
 			case <-retryTimer.C:
 				if !gotBlock {
+					if wait := bpr.pool.deferredRetry(bpr); wait > 0 {
+						retryTimer.Reset(wait)
+						continue
+					}
 					bpr.Logger.Debug("Retrying block request(s) after timeout", "height", bpr.height, "peer", bpr.peerID, "secondPeerID", bpr.secondPeerID)
 					bpr.reset(bpr.peerID)
 					bpr.reset(bpr.secondPeerID)

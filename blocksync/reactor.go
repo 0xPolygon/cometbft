@@ -95,7 +95,6 @@ func NewReactorWithAddr(state sm.State, blockExec *sm.BlockExecutor, store *stor
 	blockSync bool, localAddr crypto.Address, metrics *Metrics, offlineStateSyncHeight int64,
 	opts ...ReactorOption,
 ) *Reactor {
-
 	storeHeight := store.Height()
 	if storeHeight == 0 {
 		// If state sync was performed offline and the stores were bootstrapped to height H
@@ -365,6 +364,8 @@ func (bcR *Reactor) Receive(e p2p.Envelope) {
 	case *bcproto.StatusResponse:
 		// Got a peer status. Unverified.
 		bcR.pool.SetPeerRange(e.Src.ID(), msg.Base, msg.Height)
+	case *bcproto.BlockDeferredResponse:
+		bcR.pool.DeferRequestFrom(msg.Height, e.Src.ID())
 	case *bcproto.NoBlockResponse:
 		bcR.Logger.Debug("Peer does not have requested block", "peer", e.Src, "height", msg.Height)
 		bcR.pool.RedoRequestFrom(msg.Height, e.Src.ID())
@@ -426,7 +427,7 @@ func (r *Reactor) poolRoutine(stateSynced bool) {
 				}
 				queued := peer.TrySend(p2p.Envelope{
 					ChannelID: BlocksyncChannel,
-					Message:   &bcproto.BlockRequest{Height: request.Height},
+					Message:   &bcproto.BlockRequest{Height: request.Height, AcceptDeferred: true},
 				})
 				if !queued {
 					r.Logger.Debug("Send queue is full, drop block request", "peer", peer.ID(), "height", request.Height)

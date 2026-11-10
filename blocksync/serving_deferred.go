@@ -33,8 +33,10 @@ type deferredPeer struct {
 }
 
 type deferredRequest struct {
-	height int64
-	retry  bool
+	height         int64
+	retry          bool
+	acceptDeferred bool
+	notified       bool
 }
 
 func newDeferredBlocks(r *Reactor, policy servebudget.RetryPolicy) *deferredBlocks {
@@ -46,12 +48,12 @@ func (r *Reactor) receiveBlockRequest(msg *bc.BlockRequest, peer p2p.Peer) {
 		r.respondToPeer(msg, peer)
 		return
 	}
-	if allowBlockRequest(r, peer, msg) && !r.deferredBlocks.enqueue(peer, msg.Height) {
+	if allowBlockRequest(r, peer, msg) && !r.deferredBlocks.enqueue(peer, msg.Height, msg.AcceptDeferred) {
 		r.metrics.ServingBudgetDrops.Add(1)
 	}
 }
 
-func (d *deferredBlocks) enqueue(peer p2p.Peer, height int64) bool {
+func (d *deferredBlocks) enqueue(peer p2p.Peer, height int64, acceptDeferred bool) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.stopped || !peer.IsRunning() {
@@ -78,7 +80,7 @@ func (d *deferredBlocks) enqueue(peer p2p.Peer, height int64) bool {
 		return false
 	}
 	q.pending[height] = struct{}{}
-	q.heights <- &deferredRequest{height: height}
+	q.heights <- &deferredRequest{height: height, acceptDeferred: acceptDeferred}
 	return true
 }
 
@@ -141,12 +143,15 @@ func (d *deferredBlocks) serve(q *deferredPeer, request *deferredRequest) bool {
 	case <-q.peer.Quit():
 		p2p.FinishServing(lease)
 	default:
-		d.reactor.serveBlock(&bc.BlockRequest{Height: request.height}, q.peer, lease)
+		return d.reactor.serveBlock(&bc.BlockRequest{Height: request.height}, q.peer, lease)
 	}
 	return true
 }
 
 func (d *deferredBlocks) deferRequest(q *deferredPeer, request *deferredRequest) bool {
+	if request.acceptDeferred && !request.notified {
+		request.notified = q.peer.TrySend(p2p.Envelope{ChannelID: BlocksyncChannel, Message: &bc.BlockDeferredResponse{Height: request.height}})
+	}
 	timer := time.NewTimer(100 * time.Millisecond)
 	defer timer.Stop()
 	select {

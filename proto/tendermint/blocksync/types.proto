@@ -9,10 +9,16 @@ import "tendermint/types/types.proto";
 // BlockRequest requests a block for a specific height
 message BlockRequest {
   int64 height = 1;
+  bool accept_deferred = 2;
 }
 
 // NoBlockResponse informs the node that the peer does not have block at the requested height
 message NoBlockResponse {
+  int64 height = 1;
+}
+
+// BlockDeferredResponse acknowledges a queued request when serving capacity is busy.
+message BlockDeferredResponse {
   int64 height = 1;
 }
 
@@ -39,5 +45,6 @@ message Message {
     BlockResponse   block_response    = 3;
     StatusRequest   status_request    = 4;
     StatusResponse  status_response   = 5;
+    BlockDeferredResponse block_deferred_response = 6;
   }
 }
