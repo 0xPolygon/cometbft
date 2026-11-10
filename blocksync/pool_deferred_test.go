@@ -228,3 +228,42 @@ func TestDeferredCompletionAndTimerRace(t *testing.T) {
 		pool.RemovePeer(peer.id)
 	}
 }
+
+func TestDeferredCompletionPreservesOtherSourceDeadline(t *testing.T) {
+	pool, request, peer := deferredPool(t)
+	pool.SetPeerRange("other", 1, 100)
+	other := pool.peers["other"]
+	other.incrPending()
+	t.Cleanup(func() { pool.RemovePeer(other.id) })
+	request.secondPeerID, request.requestedAt[1] = other.id, time.Now()
+	deadline := other.timeoutAt
+	require.NoError(t, pool.AddBlock(peer.id, types.MakeBlock(1, nil, &types.Commit{}, nil), nil, 1024))
+	require.Equal(t, deadline, other.timeoutAt, "another peer's response must not renew this source's timeout")
+}
+
+func TestDeferredStaleCallbackRearmsTimer(t *testing.T) {
+	pool, _, peer := deferredPool(t)
+	pool.mtx.Lock()
+	peer.timeout.Stop()
+	peer.timeoutAt = time.Now().Add(100 * time.Millisecond)
+	pool.mtx.Unlock()
+	peer.onTimeout()
+	require.Eventually(t, func() bool {
+		pool.mtx.Lock()
+		defer pool.mtx.Unlock()
+		return peer.didTimeout
+	}, time.Second, time.Millisecond)
+}
+
+func TestDeferredTimerReturnsToNormalDeadline(t *testing.T) {
+	pool, _, peer := deferredPool(t)
+	pool.mtx.Lock()
+	peer.timeout.Reset(time.Hour)
+	peer.resetTimeout()
+	pool.mtx.Unlock()
+	require.Eventually(t, func() bool {
+		pool.mtx.Lock()
+		defer pool.mtx.Unlock()
+		return peer.didTimeout
+	}, peerTimeout+time.Second, time.Millisecond)
+}

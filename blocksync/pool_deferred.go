@@ -88,9 +88,5 @@ func (peer *bpPeer) clearDeferral(height int64) {
 		return
 	}
 	delete(peer.deferrals, height)
-	if peer.numPending > 0 {
-		peer.resetTimeout()
-	} else {
-		peer.refreshDeferrals()
-	}
+	peer.resetTimeout()
 }
