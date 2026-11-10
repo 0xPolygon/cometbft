@@ -46,6 +46,14 @@ func (bpr *bpRequester) deferFrom(peerID p2p.ID) time.Time {
 	return time.Time{}
 }
 
+func (bpr *bpRequester) postponeRetry(timer *time.Timer) bool {
+	if wait := bpr.pool.deferredRetry(bpr); wait > 0 {
+		timer.Reset(wait)
+		return true
+	}
+	return false
+}
+
 func (pool *BlockPool) deferredRetry(bpr *bpRequester) time.Duration {
 	pool.mtx.Lock()
 	defer pool.mtx.Unlock()

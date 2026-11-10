@@ -910,11 +910,7 @@ OUTER_LOOP:
 			case <-bpr.Quit():
 				return
 			case <-retryTimer.C:
-				if !gotBlock {
-					if wait := bpr.pool.deferredRetry(bpr); wait > 0 {
-						retryTimer.Reset(wait)
-						continue
-					}
+				if !gotBlock && !bpr.postponeRetry(retryTimer) {
 					bpr.Logger.Debug("Retrying block request(s) after timeout", "height", bpr.height, "peer", bpr.peerID, "secondPeerID", bpr.secondPeerID)
 					bpr.reset(bpr.peerID)
 					bpr.reset(bpr.secondPeerID)
