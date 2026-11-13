@@ -68,7 +68,7 @@ func TestServingBudgetKeepsBlockPoolProgress(t *testing.T) {
 	pair := newReactor(t, log.NewNopLogger(), doc, vals, blocks)
 	t.Cleanup(func() { require.NoError(t, pair.app.Stop()) })
 	server := pair.reactor.Reactor
-	server.blockSync = false
+	server.blockSync.Store(false)
 	policy := &limitedServingPolicy{tokens: 20, last: time.Now()}
 	config := cfg.DefaultP2PConfig()
 	config.ServingPolicy = policy

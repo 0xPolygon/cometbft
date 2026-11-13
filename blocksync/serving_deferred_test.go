@@ -147,7 +147,7 @@ func TestDeferredBlockDispatchAndLifecycle(t *testing.T) {
 	pair := newReactor(t, log.NewNopLogger(), doc, vals, 2)
 	t.Cleanup(func() { require.NoError(t, pair.app.Stop()) })
 	r := pair.reactor.Reactor
-	r.blockSync = false
+	r.blockSync.Store(false)
 	policy := &selectiveBlockPolicy{}
 	config := cfg.DefaultP2PConfig()
 	config.ServingPolicy = policy

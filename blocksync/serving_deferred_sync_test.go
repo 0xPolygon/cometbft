@@ -32,7 +32,7 @@ func TestServingDeferredPeerSync(t *testing.T) {
 	for _, pair := range pairs {
 		t.Cleanup(func() { require.NoError(t, pair.app.Stop()) })
 	}
-	pairs[0].reactor.blockSync = false
+	pairs[0].reactor.blockSync.Store(false)
 	policy := &pausedServingPolicy{}
 	config := cfg.DefaultP2PConfig()
 	config.ServingPolicy = policy
