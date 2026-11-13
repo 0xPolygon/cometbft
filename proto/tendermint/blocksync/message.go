@@ -8,11 +8,14 @@ import (
 	"github.com/cometbft/cometbft/p2p"
 )
 
-var _ p2p.Wrapper = &StatusRequest{}
-var _ p2p.Wrapper = &StatusResponse{}
-var _ p2p.Wrapper = &NoBlockResponse{}
-var _ p2p.Wrapper = &BlockResponse{}
-var _ p2p.Wrapper = &BlockRequest{}
+var (
+	_ p2p.Wrapper = &StatusRequest{}
+	_ p2p.Wrapper = &StatusResponse{}
+	_ p2p.Wrapper = &NoBlockResponse{}
+	_ p2p.Wrapper = &BlockResponse{}
+	_ p2p.Wrapper = &BlockRequest{}
+	_ p2p.Wrapper = &BlockDeferredResponse{}
+)
 
 const (
 	BlockResponseMessagePrefixSize   = 4
@@ -35,6 +38,10 @@ func (m *NoBlockResponse) Wrap() proto.Message {
 	bm := &Message{}
 	bm.Sum = &Message_NoBlockResponse{NoBlockResponse: m}
 	return bm
+}
+
+func (m *BlockDeferredResponse) Wrap() proto.Message {
+	return &Message{Sum: &Message_BlockDeferredResponse{BlockDeferredResponse: m}}
 }
 
 func (m *StatusRequest) Wrap() proto.Message {
@@ -61,6 +68,9 @@ func (m *Message) Unwrap() (proto.Message, error) {
 
 	case *Message_NoBlockResponse:
 		return m.GetNoBlockResponse(), nil
+
+	case *Message_BlockDeferredResponse:
+		return m.GetBlockDeferredResponse(), nil
 
 	case *Message_StatusRequest:
 		return m.GetStatusRequest(), nil

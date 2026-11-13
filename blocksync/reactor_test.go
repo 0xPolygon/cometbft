@@ -544,89 +544,40 @@ func TestRespondToPeer_NonPersistentPeerStillRateLimited(t *testing.T) {
 	require.False(t, queued, "a non-persistent peer beyond the per-window limit must still be dropped")
 }
 
-// NOTE: This is too hard to test without
-// an easy way to add test peer to switch
-// or without significant refactoring of the module.
-// Alternatively we could actually dial a TCP conn but
-// that seems extreme.
 func TestBadBlockStopsPeer(t *testing.T) {
 	config = test.ResetTestRoot("blocksync_reactor_test")
 	defer os.RemoveAll(config.RootDir)
-	genDoc, privVals := genesisDocWithValsPowers([]int64{30})
-
-	maxBlockHeight := int64(148)
-
-	// Other chain needs a different validator set
-	otherGenDoc, otherPrivVals := genesisDocWithValsPowers([]int64{30})
-	otherChain := newReactor(t, log.TestingLogger(), otherGenDoc, otherPrivVals, maxBlockHeight)
-
-	defer func() {
-		err := otherChain.reactor.Stop()
-		require.Error(t, err)
-		err = otherChain.app.Stop()
-		require.NoError(t, err)
-	}()
-
-	reactorPairs := make([]ReactorPair, 4) //nolint:prealloc
-
-	reactorPairs[0] = newReactor(t, log.TestingLogger(), genDoc, privVals, maxBlockHeight)
-	reactorPairs[1] = newReactor(t, log.TestingLogger(), genDoc, privVals, 0)
-	reactorPairs[2] = newReactor(t, log.TestingLogger(), genDoc, privVals, 0)
-	reactorPairs[3] = newReactor(t, log.TestingLogger(), genDoc, privVals, 0)
-
-	switches := p2p.MakeConnectedSwitches(config.P2P, 4, func(i int, s *p2p.Switch) *p2p.Switch {
-		s.AddReactor("BLOCKSYNC", reactorPairs[i].reactor)
-		return s
-	}, p2p.Connect2Switches)
-
-	defer func() {
-		for _, r := range reactorPairs {
-			err := r.reactor.Stop()
-			require.NoError(t, err)
-
-			err = r.app.Stop()
-			require.NoError(t, err)
-		}
-	}()
-
-	for {
-		time.Sleep(1 * time.Second)
-		caughtUp := true
-		for _, r := range reactorPairs {
-			if !r.reactor.pool.IsCaughtUp() {
-				caughtUp = false
-			}
-		}
-		if caughtUp {
-			break
-		}
+	genDoc, vals := genesisDocWithValsPowers([]int64{30})
+	otherDoc, otherVals := genesisDocWithValsPowers([]int64{30})
+	const height = 100
+	pairs := []ReactorPair{
+		newReactor(t, log.NewNopLogger(), otherDoc, otherVals, height),
+		newReactor(t, log.NewNopLogger(), genDoc, vals, 0),
+		newReactor(t, log.NewNopLogger(), genDoc, vals, height),
+	}
+	for _, pair := range pairs {
+		t.Cleanup(func() { require.NoError(t, pair.app.Stop()) })
+	}
+	switches := p2p.MakeConnectedSwitches(config.P2P, len(pairs), func(i int, sw *p2p.Switch) *p2p.Switch {
+		sw.AddReactor("BLOCKSYNC", pairs[i].reactor)
+		return sw
+	}, func([]*p2p.Switch, int, int) {})
+	for _, sw := range switches {
+		t.Cleanup(func() { require.NoError(t, sw.Stop()) })
 	}
 
-	// at this time, reactors[0-3] is the newest
-	assert.Equal(t, 3, reactorPairs[1].reactor.Switch.Peers().Size())
+	// Make the invalid source the only choice before checking recovery with a good one.
+	p2p.Connect2Switches(switches, 0, 1)
+	require.Eventually(t, func() bool {
+		return switches[1].Peers().Size() == 0
+	}, 10*time.Second, 10*time.Millisecond)
+	require.Zero(t, pairs[1].reactor.store.Height())
 
-	// Mark reactorPairs[3] as an invalid peer. Fiddling with .store without a mutex is a data
-	// race, but can't be easily avoided.
-	reactorPairs[3].reactor.store = otherChain.reactor.store
-
-	lastReactorPair := newReactor(t, log.TestingLogger(), genDoc, privVals, 0)
-	reactorPairs = append(reactorPairs, lastReactorPair)
-
-	switches = append(switches, p2p.MakeConnectedSwitches(config.P2P, 1, func(i int, s *p2p.Switch) *p2p.Switch {
-		s.AddReactor("BLOCKSYNC", reactorPairs[len(reactorPairs)-1].reactor)
-		return s
-	}, p2p.Connect2Switches)...)
-
-	for i := 0; i < len(reactorPairs)-1; i++ {
-		p2p.Connect2Switches(switches, i, len(reactorPairs)-1)
-	}
-
-	for !lastReactorPair.reactor.pool.IsCaughtUp() && lastReactorPair.reactor.Switch.Peers().Size() != 0 {
-
-		time.Sleep(1 * time.Second)
-	}
-
-	assert.True(t, lastReactorPair.reactor.Switch.Peers().Size() < len(reactorPairs)-1)
+	p2p.Connect2Switches(switches, 1, 2)
+	require.Eventually(t, func() bool {
+		return pairs[1].reactor.store.Height() >= height-1
+	}, 10*time.Second, 10*time.Millisecond)
+	require.Equal(t, 1, switches[1].Peers().Size())
 }
 
 func TestCheckSwitchToConsensusLastHeightZero(t *testing.T) {

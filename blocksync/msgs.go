@@ -37,6 +37,10 @@ func ValidateMsg(pb proto.Message) error {
 		if msg.Height < 0 {
 			return ErrInvalidHeight{Height: msg.Height, Reason: "negative height"}
 		}
+	case *bcproto.BlockDeferredResponse:
+		if msg.Height < 0 {
+			return ErrInvalidHeight{Height: msg.Height, Reason: "negative height"}
+		}
 	case *bcproto.StatusResponse:
 		if msg.Base < 0 {
 			return ErrInvalidBase{Base: msg.Base, Reason: "negative base"}
