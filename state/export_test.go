@@ -80,3 +80,11 @@ func (p *Pruner) PruneTxIndexerToRetainHeight(lastRetainHeight int64) int64 {
 func (p *Pruner) PruneBlockIndexerToRetainHeight(lastRetainHeight int64) int64 {
 	return p.pruneBlockIndexerToRetainHeight(lastRetainHeight)
 }
+
+func NewStoreForTesting(db dbm.DB) dbStore {
+	return dbStore{db, StoreOptions{DiscardABCIResponses: false}, StoreStateKeeper{}}
+}
+
+func (store dbStore) GetLastABCIResponsesRetainHeight() (int64, error) {
+	return store.getLastABCIResponsesRetainHeight()
+}
