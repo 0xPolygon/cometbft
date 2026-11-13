@@ -9,6 +9,7 @@ import (
 	"net"
 	"reflect"
 	"runtime/debug"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -78,6 +79,10 @@ channel's queue is full.
 Inbound message bytes are handled with an onReceive callback function.
 */
 type MConnection struct {
+	receiptMu      sync.Mutex
+	receipts       map[*sendReceipt]struct{}
+	receiptsClosed bool
+
 	service.BaseService
 
 	conn          net.Conn
@@ -276,6 +281,7 @@ func (c *MConnection) stopServices() (alreadyStopped bool) {
 // .Send() calls will get flushed before closing
 // the connection.
 func (c *MConnection) FlushStop() {
+	defer c.cancelReceipts()
 	if c.stopServices() {
 		return
 	}
@@ -311,6 +317,7 @@ func (c *MConnection) FlushStop() {
 
 // OnStop implements BaseService
 func (c *MConnection) OnStop() {
+	defer c.cancelReceipts()
 	if c.stopServices() {
 		return
 	}
@@ -330,6 +337,7 @@ func (c *MConnection) String() string {
 func (c *MConnection) flush() {
 	c.Logger.Debug("Flush", "conn", c)
 	err := c.bufConnWriter.Flush()
+	c.finishFlushed(err == nil)
 	if err != nil {
 		c.Logger.Debug("MConnection flush failed", "err", err)
 	}
@@ -784,10 +792,11 @@ func (chDesc ChannelDescriptor) FillDefaults() (filled ChannelDescriptor) {
 type Channel struct {
 	conn          *MConnection
 	desc          ChannelDescriptor
-	sendQueue     chan []byte
+	sendQueue     chan outboundMessage
 	sendQueueSize int32 // atomic.
 	recving       []byte
 	sending       []byte
+	receipt       *sendReceipt
 	recentlySent  int64 // exponential moving average
 
 	maxPacketMsgPayloadSize int
@@ -803,7 +812,7 @@ func newChannel(conn *MConnection, desc ChannelDescriptor) *Channel {
 	return &Channel{
 		conn:                    conn,
 		desc:                    desc,
-		sendQueue:               make(chan []byte, desc.SendQueueCapacity),
+		sendQueue:               make(chan outboundMessage, desc.SendQueueCapacity),
 		recving:                 make([]byte, 0, desc.RecvBufferCapacity),
 		maxPacketMsgPayloadSize: conn.config.MaxPacketMsgPayloadSize,
 	}
@@ -818,7 +827,7 @@ func (ch *Channel) SetLogger(l log.Logger) {
 // Times out (and returns false) after defaultSendTimeout
 func (ch *Channel) sendBytes(bytes []byte) bool {
 	select {
-	case ch.sendQueue <- bytes:
+	case ch.sendQueue <- outboundMessage{data: bytes}:
 		atomic.AddInt32(&ch.sendQueueSize, 1)
 		return true
 	case <-time.After(defaultSendTimeout):
@@ -831,7 +840,7 @@ func (ch *Channel) sendBytes(bytes []byte) bool {
 // Goroutine-safe
 func (ch *Channel) trySendBytes(bytes []byte) bool {
 	select {
-	case ch.sendQueue <- bytes:
+	case ch.sendQueue <- outboundMessage{data: bytes}:
 		atomic.AddInt32(&ch.sendQueueSize, 1)
 		return true
 	default:
@@ -854,11 +863,12 @@ func (ch *Channel) canSend() bool {
 // Call before calling nextPacketMsg()
 // Goroutine-safe
 func (ch *Channel) isSendPending() bool {
-	if len(ch.sending) == 0 {
+	if len(ch.sending) == 0 && ch.receipt == nil {
 		if len(ch.sendQueue) == 0 {
 			return false
 		}
-		ch.sending = <-ch.sendQueue
+		msg := <-ch.sendQueue
+		ch.sending, ch.receipt = msg.data, msg.receipt
 	}
 	return true
 }
@@ -888,6 +898,10 @@ func (ch *Channel) writePacketMsgTo(w protoio.Writer) (n int, err error) {
 	n, err = w.WriteMsg(mustWrapPacket(&packet))
 	if err != nil {
 		return 0, err
+	}
+	if packet.EOF && ch.receipt != nil {
+		ch.conn.markWritten(ch.receipt)
+		ch.receipt = nil
 	}
 	atomic.AddInt64(&ch.recentlySent, int64(n))
 	return n, nil

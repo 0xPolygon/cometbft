@@ -208,6 +208,11 @@ func TestAddAndRemoveListenerConcurrency(t *testing.T) {
 		}
 	})
 
+	// Keep event cells alive so cleanup cannot hide a late callback registration.
+	for i := 0; i < roundCount; i++ {
+		require.NoError(t, evsw.AddListenerForEvent("keeper", fmt.Sprintf("event%d", i), func(EventData) {}))
+	}
+
 	done1 := make(chan struct{})
 	done2 := make(chan struct{})
 
@@ -333,6 +338,7 @@ func TestRemoveListener(t *testing.T) {
 
 	// remove one by event and make sure it is gone
 	evsw.RemoveListenerForEvent("event2", "listener")
+	assert.NotContains(t, evsw.(*eventSwitch).eventCells, "event2")
 	for i := 0; i < count; i++ {
 		evsw.FireEvent("event1", true)
 		evsw.FireEvent("event2", true)
@@ -342,6 +348,7 @@ func TestRemoveListener(t *testing.T) {
 
 	// remove the listener entirely and make sure both gone
 	evsw.RemoveListener("listener")
+	assert.Empty(t, evsw.(*eventSwitch).eventCells)
 	for i := 0; i < count; i++ {
 		evsw.FireEvent("event1", true)
 		evsw.FireEvent("event2", true)
@@ -476,7 +483,8 @@ func sumReceivedNumbers(numbers, doneSum chan uint64) {
 // sent on `doneChan` for assertion that all events have been sent, and enabling
 // the test to assert all events have also been received.
 func fireEvents(evsw Fireable, event string, doneChan chan uint64,
-	offset uint64) {
+	offset uint64,
+) {
 	var sentSum uint64
 	for i := offset; i <= offset+uint64(999); i++ {
 		sentSum += i
