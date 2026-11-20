@@ -758,7 +758,9 @@ func (app *Application) checkBlobEnabled(callsite string) bool {
 
 func (app *Application) checkHeightAndExtensions(isPrepareProcessProposal bool, height int64, callsite string) (int64, bool) {
 	appHeight := app.getAppHeight()
-	if height != appHeight {
+	// A late precommit for the previous height is verified while the app is already at the next one.
+	isLateVote := callsite == "VerifyVoteExtension" && height == appHeight-1
+	if height != appHeight && !isLateVote {
 		panic(fmt.Errorf(
 			"got unexpected height in %s request; expected %d, actual %d",
 			callsite, appHeight, height,
@@ -773,7 +775,7 @@ func (app *Application) checkHeightAndExtensions(isPrepareProcessProposal bool, 
 	if err != nil {
 		panic(fmt.Errorf("malformed vote extension height %q in database", voteExtHeightStr))
 	}
-	currentHeight := appHeight
+	currentHeight := height
 	if isPrepareProcessProposal {
 		currentHeight-- // at exactly voteExtHeight, PrepareProposal still has no extensions, see RFC100
 	}
