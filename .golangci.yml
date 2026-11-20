@@ -96,6 +96,7 @@ linters:
             - github.com/ory/dockertest
             - github.com/pkg/errors
             - github.com/prometheus/client_golang/prometheus
+            - github.com/prometheus/client_model/go
             - github.com/spf13
             - github.com/stretchr/testify
             - github.com/decred/dcrd/dcrec/secp256k1/v4
